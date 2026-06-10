@@ -1,3 +1,4 @@
+import ipv4_first  # IPv4 preferencial — ver ipv4_first.py
 from flask import Flask, jsonify, render_template_string
 import tinytuya
 import json
@@ -8,7 +9,7 @@ app = Flask(__name__)
 # Carrega devices.json gerado pelo wizard
 DEVICES_FILE = os.path.join(os.path.dirname(__file__), 'devices.json')
 
-# Filtro: só coberturas (produto MS-102 / categoria ckmkzq)
+# Filtro: sÃ³ coberturas (produto MS-102 / categoria ckmkzq)
 def carregar_coberturas():
     with open(DEVICES_FILE, 'r') as f:
         devices = json.load(f)
@@ -56,9 +57,9 @@ def api_acao(device_id, comando):
     coberturas = carregar_coberturas()
     device = next((d for d in coberturas if d['id'] == device_id), None)
     if not device:
-        return jsonify({'erro': 'Dispositivo não encontrado'}), 404
+        return jsonify({'erro': 'Dispositivo nÃ£o encontrado'}), 404
     if not device.get('ip'):
-        return jsonify({'erro': 'IP não disponível'}), 400
+        return jsonify({'erro': 'IP nÃ£o disponÃ­vel'}), 400
     try:
         d = conectar(device)
         if comando == 'abrir':
@@ -66,7 +67,7 @@ def api_acao(device_id, comando):
         elif comando == 'fechar':
             d.set_value(1, False)
         else:
-            return jsonify({'erro': 'Comando inválido'}), 400
+            return jsonify({'erro': 'Comando invÃ¡lido'}), 400
         return jsonify({'ok': True, 'comando': comando, 'dispositivo': device['name']})
     except Exception as e:
         return jsonify({'erro': str(e)}), 500
@@ -104,7 +105,7 @@ HTML = '''
     </style>
 </head>
 <body>
-    <h1>🔭 Painel de Coberturas</h1>
+    <h1>ðŸ”­ Painel de Coberturas</h1>
     <div class="grid" id="grid"></div>
     <p class="atualizando" id="info">Carregando...</p>
 
@@ -134,7 +135,7 @@ HTML = '''
                 grid.appendChild(card);
             });
             document.getElementById('info').textContent = 
-                'Última atualização: ' + new Date().toLocaleTimeString('pt-BR');
+                'Ãšltima atualizaÃ§Ã£o: ' + new Date().toLocaleTimeString('pt-BR');
         }
 
         function setStatus(id, texto, classe) {

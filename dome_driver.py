@@ -1,3 +1,4 @@
+import ipv4_first  # IPv4 preferencial — ver ipv4_first.py
 import threading
 import time
 import socket
@@ -8,7 +9,7 @@ from flask import Flask, jsonify, request
 import tinytuya
 
 # ---------------------------------------------------------------------------
-# Configuracao — lida de config.json (nao versionado)
+# Configuracao â€” lida de config.json (nao versionado)
 # ---------------------------------------------------------------------------
 
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
@@ -204,7 +205,7 @@ def get_connected():
 
 @app.route('/api/v1/dome/0/connected', methods=['PUT'])
 def put_connected():
-    # Retorna estado em cache imediatamente — nao bloqueia o NINA
+    # Retorna estado em cache imediatamente â€” nao bloqueia o NINA
     # Refresh disparado em background para manter o poll atualizado
     threading.Thread(target=ler_status, daemon=True).start()
     with _lock:
@@ -310,7 +311,7 @@ def supported_actions():
 # ---------------------------------------------------------------------------
 
 if __name__ == '__main__':
-    print("Pier 1 Tuya Dome Driver — Alpaca v1.1")
+    print("Pier 1 Tuya Dome Driver â€” Alpaca v1.1")
     print("Rodando em http://localhost:11111")
     print("Conectando ao dispositivo...")
     ler_status()

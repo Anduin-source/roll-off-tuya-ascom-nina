@@ -1,17 +1,18 @@
+import ipv4_first  # IPv4 preferencial — ver ipv4_first.py
 import tinytuya
 import json
 import os
 import sys
 
 # ---------------------------------------------------------------------------
-# Configuração — lida de config.json (não versionado)
+# ConfiguraÃ§Ã£o â€” lida de config.json (nÃ£o versionado)
 # ---------------------------------------------------------------------------
 
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
 
 def carregar_config():
     if not os.path.exists(CONFIG_FILE):
-        print("ERRO: config.json não encontrado.")
+        print("ERRO: config.json nÃ£o encontrado.")
         print("Copie config.exemplo.json para config.json e preencha suas credenciais.")
         sys.exit(1)
     with open(CONFIG_FILE, 'r') as f:
@@ -26,7 +27,7 @@ COB_ID     = cfg['cobertura']['id']
 TIMEZONE   = cfg['tuya_cloud'].get('timezone', 'America/Sao_Paulo')
 
 # ---------------------------------------------------------------------------
-# Funções
+# FunÃ§Ãµes
 # ---------------------------------------------------------------------------
 
 def conectar_cloud():
@@ -68,7 +69,7 @@ def criar_timer(hora_str, acao):
     )
 
 # ---------------------------------------------------------------------------
-# Teste rápido
+# Teste rÃ¡pido
 # ---------------------------------------------------------------------------
 
 if __name__ == '__main__':

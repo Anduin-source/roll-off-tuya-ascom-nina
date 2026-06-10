@@ -1,3 +1,4 @@
+import ipv4_first  # IPv4 preferencial — ver ipv4_first.py
 import tkinter as tk
 import tinytuya
 import threading
@@ -8,14 +9,14 @@ import os
 import sys
 
 # ---------------------------------------------------------------------------
-# Configuração — lida de config.json (não versionado)
+# ConfiguraÃ§Ã£o â€” lida de config.json (nÃ£o versionado)
 # ---------------------------------------------------------------------------
 
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
 
 def carregar_config():
     if not os.path.exists(CONFIG_FILE):
-        print("ERRO: config.json não encontrado.")
+        print("ERRO: config.json nÃ£o encontrado.")
         print("Copie config.exemplo.json para config.json e preencha suas credenciais.")
         sys.exit(1)
     with open(CONFIG_FILE, 'r') as f:
@@ -40,7 +41,7 @@ API_REGION = config['tuya_cloud']['region']
 API_KEY    = config['tuya_cloud']['api_key']
 API_SECRET = config['tuya_cloud']['api_secret']
 
-# Nomes das tomadas — lidos do config, com fallback para nomes padrão
+# Nomes das tomadas â€” lidos do config, com fallback para nomes padrÃ£o
 _switches_raw = config['regua'].get('switches', {})
 SWITCHES      = {int(k): v for k, v in _switches_raw.items()}
 SWITCH_CODES  = {1: 'switch_1', 2: 'switch_2', 3: 'switch_3', 4: 'switch_4'}
@@ -63,7 +64,7 @@ TEXTO_MUT = '#94a3b8'
 SEPARADOR = '#1e3a5f'
 
 # ---------------------------------------------------------------------------
-# Conexão cloud (singleton com lock para thread-safety)
+# ConexÃ£o cloud (singleton com lock para thread-safety)
 # ---------------------------------------------------------------------------
 
 _cloud      = None
@@ -81,7 +82,7 @@ def get_cloud():
     return _cloud
 
 # ---------------------------------------------------------------------------
-# Conexão aos dispositivos
+# ConexÃ£o aos dispositivos
 # ---------------------------------------------------------------------------
 
 def conectar_cobertura():
@@ -120,8 +121,8 @@ def get_status_cobertura(dispositivo, modo):
         return dps.get('doorcontact_state', None) if dps else None
 
 def atualizar_label_cobertura(aberta, modo):
-    """Única função que escreve no label da cobertura — fonte de verdade."""
-    sufixo = ' 📡' if modo == 'cloud' else ''
+    """Ãšnica funÃ§Ã£o que escreve no label da cobertura â€” fonte de verdade."""
+    sufixo = ' ðŸ“¡' if modo == 'cloud' else ''
     if aberta is None:
         label_cob.config(text='ERRO', fg=VERMELHO)
     else:
@@ -160,7 +161,7 @@ def conectar_regua():
     return c, 'cloud', dps
 
 # ---------------------------------------------------------------------------
-# Ações da cobertura
+# AÃ§Ãµes da cobertura
 # ---------------------------------------------------------------------------
 
 def acao_cobertura(comando):
@@ -173,7 +174,7 @@ def acao_cobertura(comando):
         try:
             dispositivo, modo = conectar_cobertura()
             aberta = get_status_cobertura(dispositivo, modo)
-            sufixo = ' 📡' if modo == 'cloud' else ''
+            sufixo = ' ðŸ“¡' if modo == 'cloud' else ''
 
             if comando == 'status':
                 janela.after(0, lambda: atualizar_label_cobertura(aberta, modo))
@@ -265,7 +266,7 @@ def fechar_agendado():
         pass
 
 # ---------------------------------------------------------------------------
-# Ações da régua
+# AÃ§Ãµes da rÃ©gua
 # ---------------------------------------------------------------------------
 
 def acao_regua(switch_num, comando):
@@ -276,7 +277,7 @@ def acao_regua(switch_num, comando):
     def executar():
         try:
             dispositivo, modo, dps = conectar_regua()
-            sufixo = ' 📡' if modo == 'cloud' else ''
+            sufixo = ' ðŸ“¡' if modo == 'cloud' else ''
             code   = SWITCH_CODES[switch_num]
 
             if comando == 'status':
@@ -357,12 +358,12 @@ def formatar_hora(entry, label_feedback, config_key):
     if len(val) == 3:
         val = '0' + val
     if len(val) != 4 or not val.isdigit():
-        flash_feedback(label_feedback, "use 4 dígitos: HHMM", VERMELHO)
+        flash_feedback(label_feedback, "use 4 dÃ­gitos: HHMM", VERMELHO)
         return
 
     hora = val[:2] + ':' + val[2:]
     if not validar_hora(hora):
-        flash_feedback(label_feedback, "hora inválida", VERMELHO)
+        flash_feedback(label_feedback, "hora invÃ¡lida", VERMELHO)
         return
 
     entry.delete(0, tk.END)
@@ -377,7 +378,7 @@ def formatar_hora(entry, label_feedback, config_key):
             acao = 'abrir' if config_key == 'abrir' else 'fechar'
             r = criar_timer(hora, acao)
             if r.get('success'):
-                flash_feedback(label_feedback, "salvo na nuvem ✓", VERDE)
+                flash_feedback(label_feedback, "salvo na nuvem âœ“", VERDE)
             else:
                 flash_feedback(label_feedback, "salvo local (nuvem falhou)", AMARELO)
         except Exception:
@@ -462,14 +463,14 @@ class HorarioEditavel:
 # ---------------------------------------------------------------------------
 
 janela = tk.Tk()
-janela.title("Pier 1 — Controle")
+janela.title("Pier 1 â€” Controle")
 janela.configure(bg=BG)
 janela.geometry("420x660")
 janela.resizable(False, False)
 
-tk.Label(janela, text="🔭 Pier 1", font=('Segoe UI', 15, 'bold'),
+tk.Label(janela, text="ðŸ”­ Pier 1", font=('Segoe UI', 15, 'bold'),
          bg=BG, fg=TEXTO).pack(pady=(18, 2))
-tk.Label(janela, text="Observatório Munhoz", font=('Segoe UI', 10),
+tk.Label(janela, text="ObservatÃ³rio Munhoz", font=('Segoe UI', 10),
          bg=BG, fg=TEXTO_MUT).pack(pady=(0, 14))
 
 # Card cobertura
@@ -489,13 +490,13 @@ frame_btn_cob.pack(pady=(0, 6))
 
 btn_abrir    = btn_estilo(frame_btn_cob, "Abrir",  '#166534', VERDE, lambda: acao_cobertura('abrir'))
 btn_fechar   = btn_estilo(frame_btn_cob, "Fechar", '#1e3a5f', AZUL,  lambda: acao_cobertura('fechar'))
-btn_atualizar = btn_estilo(frame_btn_cob, "↺",    '#2a2a2a', TEXTO_MUT, lambda: acao_cobertura('status'))
+btn_atualizar = btn_estilo(frame_btn_cob, "â†º",    '#2a2a2a', TEXTO_MUT, lambda: acao_cobertura('status'))
 
 btn_abrir.grid(row=0, column=0, padx=6)
 btn_fechar.grid(row=0, column=1, padx=6)
 btn_atualizar.grid(row=0, column=2, padx=6)
 
-tk.Label(card_cob, text="↺ sincroniza o status com o dispositivo",
+tk.Label(card_cob, text="â†º sincroniza o status com o dispositivo",
          font=('Segoe UI', 7), bg=BG_CARD, fg=CINZA).pack(pady=(2, 6))
 
 separador(card_cob)
@@ -524,16 +525,16 @@ campo_fechar = HorarioEditavel(col_fechar, 'fechar', label_feedback_fechar)
 campo_fechar.pack(anchor='w', pady=(2, 2))
 label_feedback_fechar.pack(anchor='w')
 
-tk.Label(card_cob, text="Clique no horário para editar · Enter para salvar",
+tk.Label(card_cob, text="Clique no horÃ¡rio para editar Â· Enter para salvar",
          font=('Segoe UI', 8), bg=BG_CARD, fg=CINZA).pack(
          anchor='w', padx=16, pady=(8, 14))
 
-# Card régua
+# Card rÃ©gua
 card_reg = tk.Frame(janela, bg=BG_CARD, bd=0,
                     highlightthickness=1, highlightbackground=BG_BTN)
 card_reg.pack(fill='x', padx=20, pady=(0, 12))
 
-tk.Label(card_reg, text="RÉGUA", font=('Segoe UI', 9, 'bold'),
+tk.Label(card_reg, text="RÃ‰GUA", font=('Segoe UI', 9, 'bold'),
          bg=BG_CARD, fg=TEXTO_MUT).pack(anchor='w', padx=16, pady=(12, 8))
 
 labels_regua  = {}
@@ -562,7 +563,7 @@ for sw, nome in SWITCHES.items():
 tk.Frame(card_reg, bg=BG_CARD, height=10).pack()
 
 # ---------------------------------------------------------------------------
-# Inicialização
+# InicializaÃ§Ã£o
 # ---------------------------------------------------------------------------
 
 threading.Thread(target=get_cloud, daemon=True).start()
