@@ -1,48 +1,40 @@
-# ============================================================
-# Credenciais e configuracao local - NUNCA versionar
-# ============================================================
-config.json
-devices.json
-
-# Saidas de scan / wizard do tinytuya - CONTEM local_key (credenciais!)
-snapshot.json
-tinytuya.json
-tuya-raw.json
-*.snapshot.json
-
-# ============================================================
-# Backups locais - nao poluir o repo (e podem conter credenciais)
-# ============================================================
-*_backup*.py
-*.old.py
-*_old.py
-*.bak
-dome_driver_v*.py
-servidor_backup_*.py
-
-# ============================================================
-# Atalhos e arquivos do Windows
-# ============================================================
-*.lnk
-Thumbs.db
-desktop.ini
-
-# ============================================================
-# Logs e temporarios Python
-# ============================================================
+﻿# Python
 __pycache__/
 *.py[cod]
 *.pyo
-*.log
+*.pyd
+*.pyc
 
-# ============================================================
-# Ambientes virtuais
-# ============================================================
-venv/
+# Ambiente virtual
 .venv/
+venv/
 env/
 
-# ============================================================
-# Repositorio aninhado acidental (se existir)
-# ============================================================
-pier-controle/
+# Configuracoes locais e credenciais
+config.json
+devices.json
+*.local.json
+
+# Logs
+logs/
+*.log
+
+# Build / distribuicao
+build/
+dist/
+*.spec
+
+# PyInstaller temporarios
+*.manifest
+*.toc
+
+# Sistema / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Arquivos temporarios
+*.tmp
+*.bak
+*.swp
