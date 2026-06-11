@@ -100,43 +100,45 @@ _ultimo_erro_cloud    = ''
 app = Flask(__name__)
 
 # ---------------------------------------------------------------------------
-# Conexao local persistente - o coracao da v2.0
+# Conexao local: ABRE-FECHA EXPLICITO (uma conexao por operacao)
 #
-# UMA instancia de tinytuya.Device, criada uma vez e reutilizada.
-# socketPersistent mantem o socket aberto; o poll de 30s funciona como
-# heartbeat natural. Em caso de erro a conexao e FECHADA explicitamente
-# antes de recriar - nunca abandonada (padrao antigo gerava sessao
-# fantasma no firmware, ver diagnostico_2026-06-09).
+# Decisao baseada em teste empirico (teste_conexao.py, 2026-06-10):
+# socket PERSISTENTE e ABRE-FECHA deram ambos 100% de sucesso em leituras
+# densas, MAS no driver real o socket persistente ficava ocioso ~30s entre
+# polls e o firmware do MS-109 derrubava a conexao por inatividade,
+# gerando 904 a cada ~3min. Abre-fecha elimina a janela de ociosidade.
+#
+# A diferenca crucial para o padrao da v1.1 (que gerava sessao fantasma)
+# nao e "abrir a cada vez" - e o FECHAMENTO EXPLICITO (d.close()) ao fim
+# de cada uso. Socket fechado limpo nao vira fantasma; socket abandonado,
+# sim. Custo: ~0.2s de handshake por operacao (irrelevante: NINA le do cache).
+# Ver: ARQUITETURA_pier-controle_CONSOLIDADA e diagnostico_2026-06-09.
+#
+# Uso obrigatorio do padrao:
+#     with _device_lock:
+#         d = _abrir_device()
+#         try:
+#             ... usar d ...
+#         finally:
+#             _fechar_device(d)
 # ---------------------------------------------------------------------------
 
-_device = None
+def _abrir_device():
+    """Cria uma conexao local nova. Chamar com _device_lock adquirido."""
+    d = tinytuya.Device(dev_id=COB_ID, address=COB_IP,
+                        local_key=COB_KEY, version=VERSION)
+    d.set_socketPersistent(False)
+    d.set_socketTimeout(3)
+    return d
 
 
-def _get_device():
-    """Retorna a instancia persistente, criando se necessario.
-    Chamar somente com _device_lock adquirido."""
-    global _device
-    if _device is None:
-        d = tinytuya.Device(dev_id=COB_ID, address=COB_IP,
-                            local_key=COB_KEY, version=VERSION)
-        d.set_socketPersistent(True)
-        d.set_socketTimeout(3)
-        _device = d
-        log.info('Conexao local criada (persistente)')
-    return _device
-
-
-def _fechar_device():
-    """Fecha explicitamente a conexao local.
-    Chamar somente com _device_lock adquirido."""
-    global _device
-    if _device is not None:
+def _fechar_device(d):
+    """Fecha explicitamente a conexao. Nunca lanca excecao."""
+    if d is not None:
         try:
-            _device.close()
-            log.info('Conexao local fechada explicitamente')
+            d.close()
         except Exception:
             pass
-        _device = None
 
 # ---------------------------------------------------------------------------
 # Backoff apos falha local
@@ -213,10 +215,10 @@ def _aplicar_status(dps_aberta, door_time, alarm, via_cloud):
 
 
 def _status_local():
-    """Leitura via conexao persistente. Lanca excecao em falha."""
+    """Leitura local: abre, le, fecha explicitamente. Lanca excecao em falha."""
     with _device_lock:
+        d = _abrir_device()
         try:
-            d = _get_device()
             s = d.status()
             if not isinstance(s, dict) or 'dps' not in s:
                 raise RuntimeError(f'Resposta sem dps: {s}')
@@ -224,9 +226,8 @@ def _status_local():
             return (bool(dps.get('3', False)),
                     int(dps.get('4', 0)) or None,
                     dps.get('12'))
-        except Exception:
-            _fechar_device()   # fecha explicitamente antes de propagar
-            raise
+        finally:
+            _fechar_device(d)   # fecha SEMPRE, sucesso ou falha
 
 
 def _status_cloud():
@@ -279,17 +280,16 @@ def ler_status():
 # ---------------------------------------------------------------------------
 
 def _comando_local(comando):
-    """Envia comando via conexao persistente. Lanca excecao em falha."""
+    """Comando local: abre, envia, fecha explicitamente. Lanca excecao em falha."""
     with _device_lock:
+        d = _abrir_device()
         try:
-            d = _get_device()
             result = d.set_value(6, comando)
             if isinstance(result, dict) and 'Err' in result:
                 raise RuntimeError(f"Err {result['Err']}")
             return True
-        except Exception:
-            _fechar_device()
-            raise
+        finally:
+            _fechar_device(d)   # fecha SEMPRE, sucesso ou falha
 
 
 def _comando_cloud(comando):
