@@ -653,6 +653,20 @@ def put_slaved():
     return jsonify({'ErrorNumber': 0, 'ErrorMessage': ''})
 
 
+@app.route('/api/v1/dome/0/canslave', methods=['GET'])
+def can_slave():
+    # Roll-off nao acompanha o telescopio em azimute.
+    return jsonify({'Value': False, 'ErrorNumber': 0, 'ErrorMessage': ''})
+
+
+@app.route('/api/v1/dome/0/slewing', methods=['GET'])
+def slewing():
+    # 'Slewing' no contexto ASCOM Dome inclui o shutter em movimento.
+    with _state_lock:
+        movendo = _shutter in ('Opening', 'Closing')
+    return jsonify({'Value': movendo, 'ErrorNumber': 0, 'ErrorMessage': ''})
+
+
 @app.route('/api/v1/dome/0/altitude', methods=['GET'])
 def get_altitude():
     return jsonify({'Value': 0.0, 'ErrorNumber': 0, 'ErrorMessage': ''})
