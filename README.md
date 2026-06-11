@@ -432,3 +432,13 @@ Desenvolvido por André Brossel — Observatório Munhoz — MPC X93.
 ## Licença
 
 MIT License — sinta-se livre para usar, modificar e distribuir, mantendo os créditos ao autor original.
+
+---
+
+## Documentacao complementar
+
+Documentos tecnicos do projeto:
+
+- `README_USO.md` - guia rapido de uso operacional.
+- `docs/hardware_tuya_ms109.md` - hardware Tuya validado na instalacao atual.
+- `docs/estrutura_projeto.md` - estrutura atual do projeto e plano de organizacao futura.
