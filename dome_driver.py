@@ -19,10 +19,10 @@ import tinytuya
 # Ver: ARQUITETURA_pier-controle_CONSOLIDADA_2026-06-10.md
 #
 # Mapeamento DPS (confirmado via API cloud em 2026-06-10):
-#   DPS 1  switch_1          - pulso bruto (NAO USAR - nao idempotente)
+#   DPS 1  switch_1          - ACIONAMENTO REAL: True=abrir, False=fechar (absoluto)
 #   DPS 3  doorcontact_state - sensor fisico: False=fechada, True=aberta
 #   DPS 4  door_time_1       - tempo de curso configurado no dispositivo (s)
-#   DPS 6  door_control_1    - comando explicito: 'open' / 'close'
+#   DPS 6  door_control_1    - aceito mas IGNORADO por este firmware (nao usar p/ comando)
 #   DPS 12 door_state_1      - alarme: 'none' = normal
 # ===========================================================================
 
@@ -276,15 +276,28 @@ def ler_status():
         _connected = False
 
 # ---------------------------------------------------------------------------
-# Envio de comandos (door_control_1 / DPS 6 - explicito, nunca DPS 1)
+# Envio de comandos
+#
+# IMPORTANTE: este firmware (Novadigital MS-109) NAO aciona o motor pelo
+# door_control_1 (DPS 6) - o dispositivo aceita o comando e o ignora.
+# O acionamento real e pelo switch_1 (DPS 1), confirmado empiricamente
+# (2026-06-10, via camera): set_value(1, True)=abrir, False=fechar.
+# E COMANDO ABSOLUTO, nao toggle: 'close' num telhado ja fechado nao o abre.
+# door_control_1 segue disponivel para LEITURA de estado, mas nunca para comando.
 # ---------------------------------------------------------------------------
 
+# Mapeia comando textual -> valor booleano do switch_1 (DPS 1)
+def _comando_para_dps1(comando):
+    return True if comando == 'open' else False
+
 def _comando_local(comando):
-    """Comando local: abre, envia, fecha explicitamente. Lanca excecao em falha."""
+    """Comando local via switch_1 (DPS 1). comando: 'open'/'close'.
+    Abre, envia, fecha explicitamente. Lanca excecao em falha."""
+    valor = _comando_para_dps1(comando)
     with _device_lock:
         d = _abrir_device()
         try:
-            result = d.set_value(6, comando)
+            result = d.set_value(1, valor)
             if isinstance(result, dict) and 'Err' in result:
                 raise RuntimeError(f"Err {result['Err']}")
             return True
@@ -293,11 +306,13 @@ def _comando_local(comando):
 
 
 def _comando_cloud(comando):
-    """Envia comando via API cloud. Lanca excecao em falha."""
+    """Envia comando via API cloud usando switch_1 (DPS 1).
+    Lanca excecao em falha."""
     global _ultimo_erro_cloud
+    valor = _comando_para_dps1(comando)
     try:
         r = get_cloud().sendcommand(
-            COB_ID, [{'code': 'door_control_1', 'value': comando}])
+            COB_ID, [{'code': 'switch_1', 'value': valor}])
         if not r.get('success'):
             raise RuntimeError(f'Cloud sem sucesso: {r}')
         return True
