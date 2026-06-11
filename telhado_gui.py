@@ -237,22 +237,24 @@ def comando_cobertura(comando):
 
 def _sufixo_modo(modo):
     if modo == 'driver':
-        return ''           # driver e o caminho normal, sem icone
+        return ' [driver]'
     if modo == 'local':
-        return ' \U0001F50C'  # tomada (local direto, sem driver)
+        return ' [local]'
     if modo == 'cloud':
-        return ' \U0001F4E1'  # antena (cloud)
+        return ' [cloud]'
     return ''
 
 
 def atualizar_label_cobertura(aberta, modo):
-    sufixo = _sufixo_modo(modo)
+    sufixo = _sufixo_modo(modo).strip()
     if aberta is None:
         label_cob.config(text='ERRO', fg=VERMELHO)
+        label_modo.config(text='')
     else:
         label_cob.config(
-            text=('ABERTA' if aberta else 'FECHADA') + sufixo,
+            text='ABERTA' if aberta else 'FECHADA',
             fg=VERDE if aberta else AZUL)
+        label_modo.config(text=sufixo)
 
 # ---------------------------------------------------------------------------
 # Acoes da cobertura
@@ -283,7 +285,7 @@ def acao_cobertura(comando):
                 sufixo = _sufixo_modo(modo)
                 transicao = 'abrindo...' if comando == 'abrir' else 'fechando...'
                 janela.after(0, lambda: label_cob.config(
-                    text=transicao + sufixo, fg=AMARELO))
+                    text=transicao, fg=AMARELO))
 
                 def verificar():
                     time.sleep(13)  # door_time_1 (10s) + margem
@@ -374,7 +376,7 @@ def acao_regua(switch_num, comando):
         dispositivo = None
         try:
             dispositivo, modo, dps = conectar_regua()
-            sufixo = ' \U0001F4E1' if modo == 'cloud' else ''
+            sufixo = ' [cloud]' if modo == 'cloud' else ''
             code   = SWITCH_CODES[switch_num]
 
             if comando == 'status':
@@ -420,7 +422,7 @@ def status_todos_regua():
         dispositivo = None
         try:
             dispositivo, modo, dps = conectar_regua()
-            sufixo = ' \U0001F4E1' if modo == 'cloud' else ''
+            sufixo = ' [cloud]' if modo == 'cloud' else ''
             for sw in SWITCHES:
                 code = SWITCH_CODES[sw]
                 ligado = dps.get(str(sw), False) if modo == 'local' else dps.get(code, False)
@@ -598,13 +600,13 @@ class HorarioEditavel:
 janela = tk.Tk()
 janela.title("Pier 1 - Controle")
 janela.configure(bg=BG)
-janela.geometry("420x660")
+janela.geometry("420x700")
 janela.resizable(False, False)
 
 tk.Label(janela, text="\U0001F52D Pier 1", font=('Segoe UI', 15, 'bold'),
-         bg=BG, fg=TEXTO).pack(pady=(18, 2))
+         bg=BG, fg=TEXTO).pack(pady=(14, 2))
 tk.Label(janela, text="Observatorio Munhoz", font=('Segoe UI', 10),
-         bg=BG, fg=TEXTO_MUT).pack(pady=(0, 14))
+         bg=BG, fg=TEXTO_MUT).pack(pady=(0, 12))
 
 # Card cobertura
 card_cob = tk.Frame(janela, bg=BG_CARD, bd=0,
@@ -616,7 +618,12 @@ tk.Label(card_cob, text="COBERTURA", font=('Segoe UI', 9, 'bold'),
 
 label_cob = tk.Label(card_cob, text="---", font=('Segoe UI', 24, 'bold'),
                      bg=BG_CARD, fg=CINZA)
-label_cob.pack(pady=(4, 8))
+label_cob.pack(pady=(4, 2))
+
+# Label secundario: modo de conexao em fonte pequena e cinza discreta
+label_modo = tk.Label(card_cob, text="", font=('Segoe UI', 8),
+                      bg=BG_CARD, fg='#4a5568')
+label_modo.pack(pady=(0, 6))
 
 frame_btn_cob = tk.Frame(card_cob, bg=BG_CARD)
 frame_btn_cob.pack(pady=(0, 6))
@@ -693,7 +700,7 @@ for sw, nome in SWITCHES.items():
 
     botoes_regua[sw] = {'ligar': btn_on, 'desligar': btn_off}
 
-tk.Frame(card_reg, bg=BG_CARD, height=10).pack()
+tk.Frame(card_reg, bg=BG_CARD, height=12).pack()
 
 # ---------------------------------------------------------------------------
 # Inicializacao
