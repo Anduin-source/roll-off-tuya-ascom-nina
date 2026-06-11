@@ -26,7 +26,7 @@ import tinytuya
 #   DPS 12 door_state_1      - alarme: 'none' = normal
 # ===========================================================================
 
-VERSAO_DRIVER = '2.0'
+VERSAO_DRIVER = '2.1-ms109'  # ms109: pos-validacao DPS1 absoluto, abre-fecha
 
 # ---------------------------------------------------------------------------
 # Configuracao - lida de config.json (nao versionado)
@@ -286,9 +286,15 @@ def ler_status():
 # door_control_1 segue disponivel para LEITURA de estado, mas nunca para comando.
 # ---------------------------------------------------------------------------
 
-# Mapeia comando textual -> valor booleano do switch_1 (DPS 1)
+# Mapeia comando textual -> valor booleano do switch_1 (DPS 1).
+# Lanca ValueError para qualquer string diferente de 'open'/'close' —
+# evita que erro de digitacao vire fechamento silencioso.
 def _comando_para_dps1(comando):
-    return True if comando == 'open' else False
+    if comando == 'open':
+        return True
+    if comando == 'close':
+        return False
+    raise ValueError(f'Comando invalido para DPS1: {repr(comando)}')
 
 def _comando_local(comando):
     """Comando local via switch_1 (DPS 1). comando: 'open'/'close'.
@@ -321,12 +327,27 @@ def _comando_cloud(comando):
         raise
 
 
+def _comando_redundante(comando):
+    """Retorna True se o estado em cache ja e o desejado.
+    Usado para evitar envio de comando desnecessario e reduzir risco
+    operacional — principalmente para 'close' em automacoes de seguranca."""
+    with _state_lock:
+        return (
+            (comando == 'close' and _shutter == 'Closed') or
+            (comando == 'open'  and _shutter == 'Open')
+        )
+
+
 def enviar_comando(comando, origem='nina'):
     """Envia 'open' ou 'close'. Local (se liberado) -> cloud.
     Retorna (ok, via). Loga tudo."""
     global _comandos_total, _cloud_fallback_total
     _comandos_total += 1
     t0 = time.time()
+
+    if _comando_redundante(comando):
+        log.info(f'COMANDO {comando} origem={origem} ignorado: estado ja confirmado ({_shutter})')
+        return True, 'cache'
 
     if _local_liberado():
         try:
@@ -364,11 +385,12 @@ def _agendar_refresh(segundos):
     threading.Thread(target=_job, daemon=True).start()
 
 # ---------------------------------------------------------------------------
-# Fechamento de emergencia - GARANTE, nao tenta
+# Fechamento de emergencia - envia, aguarda e verifica
 #
-# Diferenca para closeshutter: envia, ESPERA o curso, VERIFICA o sensor
-# fisico, e repete pelo outro caminho se nao confirmar. Ponto de
-# integracao futuro do nobreak do telhado.
+# Diferenca para closeshutter: envia, ESPERA o curso, le o sensor fisico,
+# e repete pelo outro caminho se nao confirmar. Nao garante fechamento em
+# caso de falha mecanica, eletrica ou de rede - e a melhor tentativa
+# possivel por software. Ponto de integracao futuro do nobreak.
 # ---------------------------------------------------------------------------
 
 def _verificar_fechada():
