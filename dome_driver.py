@@ -140,6 +140,13 @@ def _fechar_device(d):
         except Exception:
             pass
 
+
+def _device_atual():
+    """No modo abre-fecha nao ha conexao mantida entre operacoes - cada
+    operacao abre e fecha a sua. Retorna None; o shutdown so adquire o
+    _device_lock para garantir que nenhuma operacao esta em curso."""
+    return None
+
 # ---------------------------------------------------------------------------
 # Backoff apos falha local
 #
@@ -548,6 +555,23 @@ def emergency_close():
     resultado = executar_emergency_close()
     codigo = 200 if resultado['ok'] else 500
     return jsonify(resultado), codigo
+
+
+@app.route('/shutdown', methods=['POST'])
+def shutdown():
+    """Encerramento gracioso: fecha a conexao local com o MS-109 antes de
+    sair, evitando socket pendurado no firmware. Chamado pela GUI ao fechar.
+    NAO move o telhado - apenas encerra o processo do driver."""
+    log.info('Shutdown solicitado - encerrando driver graciosamente')
+    with _device_lock:
+        _fechar_device(_device_atual())
+
+    def _encerrar():
+        time.sleep(0.3)  # da tempo da resposta HTTP voltar
+        os._exit(0)      # encerra o processo imediatamente, sem reaproveitar
+
+    threading.Thread(target=_encerrar, daemon=True).start()
+    return jsonify({'ok': True, 'message': 'driver encerrando'})
 
 # ---------------------------------------------------------------------------
 # Management endpoints (Alpaca - contrato com o NINA, inalterado)

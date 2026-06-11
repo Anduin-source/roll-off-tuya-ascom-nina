@@ -8,6 +8,7 @@ import json
 import os
 import sys
 import urllib.request
+import subprocess
 
 # ===========================================================================
 # Pier 1 - Interface de controle (GUI)
@@ -144,6 +145,88 @@ def _driver_comando(comando):
         return data.get('ok', False)
     except Exception:
         return False
+
+
+# ---------------------------------------------------------------------------
+# Ciclo de vida do driver
+#
+# A GUI e o ponto de controle do telhado. Ao abrir, sobe o driver (se ainda
+# nao estiver rodando). Ao fechar, encerra o driver QUE ELA MESMA subiu -
+# fechar a GUI = desligar o controle do telhado (decisao consciente do
+# usuario). Se o driver ja estava rodando (subido por fora), a GUI usa mas
+# NAO o encerra ao fechar, pois nao foi ela que o iniciou.
+# ---------------------------------------------------------------------------
+
+_driver_proc = None          # subprocesso do driver, se a GUI o subiu
+_driver_era_nosso = False    # True se a GUI iniciou o driver
+
+
+def _iniciar_driver_se_preciso():
+    """Sobe o driver como subprocesso se ele ainda nao estiver rodando.
+    Retorna texto de status para log/feedback."""
+    global _driver_proc, _driver_era_nosso
+
+    if _driver_vivo():
+        # Ja havia um driver rodando (subido por fora) - usamos, mas nao
+        # vamos encerra-lo ao fechar a GUI.
+        _driver_era_nosso = False
+        return 'driver ja estava rodando'
+
+    # Sobe o driver. pythonw = sem console. cwd na pasta do projeto para
+    # ele achar config.json e devices.json.
+    try:
+        base = os.path.dirname(os.path.abspath(__file__))
+        driver_path = os.path.join(base, 'dome_driver.py')
+        # pythonw.exe roda sem janela de console
+        pyw = os.path.join(os.path.dirname(sys.executable), 'pythonw.exe')
+        executavel = pyw if os.path.exists(pyw) else sys.executable
+        _driver_proc = subprocess.Popen(
+            [executavel, driver_path],
+            cwd=base
+        )
+        _driver_era_nosso = True
+        # Espera o driver subir (ate ~8s - inclui a 1a leitura do dispositivo)
+        for _ in range(40):
+            time.sleep(0.2)
+            if _driver_proc.poll() is not None:
+                rc = _driver_proc.returncode
+                _driver_proc = None
+                _driver_era_nosso = False
+                return f'driver morreu ao iniciar (codigo {rc}) - standalone'
+            if _driver_vivo():
+                return 'driver iniciado pela GUI'
+        return 'driver iniciado mas /health nao respondeu em 8s'
+    except Exception as e:
+        _driver_proc = None
+        _driver_era_nosso = False
+        return f'falha ao iniciar driver: {e} (operando standalone)'
+
+
+def _encerrar_driver():
+    """Encerra o driver graciosamente, mas SOMENTE se foi a GUI que o subiu.
+    Pede shutdown limpo (fecha socket do MS-109); se nao responder, mata."""
+    global _driver_proc, _driver_era_nosso
+    if not _driver_era_nosso:
+        return  # nao fomos nos que subimos - nao mexe
+
+    # 1. Tenta shutdown gracioso (driver fecha o socket local antes de sair)
+    try:
+        req = urllib.request.Request(DRIVER_URL + '/shutdown', method='POST')
+        urllib.request.urlopen(req, timeout=3)
+    except Exception:
+        pass  # pode ja ter saido; segue para o fallback
+
+    # 2. Fallback: se o processo ainda existe apos uns segundos, termina
+    if _driver_proc is not None:
+        try:
+            _driver_proc.wait(timeout=4)
+        except Exception:
+            try:
+                _driver_proc.terminate()
+            except Exception:
+                pass
+    _driver_proc = None
+    _driver_era_nosso = False
 
 
 def _local_status():
@@ -712,7 +795,28 @@ threading.Thread(target=get_cloud, daemon=True).start()
 iniciar_agendamento_salvo()
 threading.Thread(target=loop_schedule, daemon=True).start()
 
-janela.after(500, lambda: acao_cobertura('status'))
-janela.after(800, status_todos_regua)
+
+def _ao_fechar():
+    """Fechar a GUI = desligar o controle do telhado. Encerra o driver
+    (se a GUI o subiu) e fecha a janela."""
+    label_cob.config(text='encerrando...', fg=CINZA)
+    janela.update_idletasks()
+    _encerrar_driver()
+    janela.destroy()
+
+
+janela.protocol('WM_DELETE_WINDOW', _ao_fechar)
+
+
+def _bootstrap():
+    """Sobe o driver (se preciso) e dispara a primeira leitura de status."""
+    status_inicio = _iniciar_driver_se_preciso()
+    print(f'[GUI] {status_inicio}')
+    acao_cobertura('status')
+    status_todos_regua()
+
+
+# Sobe o driver em background para nao travar a abertura da janela
+janela.after(300, lambda: threading.Thread(target=_bootstrap, daemon=True).start())
 
 janela.mainloop()
