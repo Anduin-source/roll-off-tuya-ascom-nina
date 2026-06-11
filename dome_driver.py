@@ -208,10 +208,22 @@ def _aplicar_status(dps_aberta, door_time, alarm, via_cloud):
     """Atualiza o estado interno a partir de uma leitura bem-sucedida."""
     global _shutter, _connected, _modo_cloud, _door_time, _status_ts, _door_alarm
     with _state_lock:
-        # Nao sobrescreve estados transitorios (Opening/Closing) com leitura
-        # antiga - eles expiram pelo refresh agendado apos o comando
-        if _shutter not in ('Opening', 'Closing'):
-            _shutter = 'Open' if dps_aberta else 'Closed'
+        estado_fisico = 'Open' if dps_aberta else 'Closed'
+        # Transicao: so confirma a saida de Opening/Closing quando o sensor
+        # fisico bate com o alvo da transicao. Isso evita que uma leitura no
+        # meio do curso (telhado ainda movendo) zere o estado, mas PERMITE que
+        # a confirmacao real do sensor encerre a transicao - resolve o
+        # "preso em Closing" quando o curso e maior que o tempo estimado.
+        if _shutter == 'Closing':
+            if estado_fisico == 'Closed':
+                _shutter = 'Closed'      # confirmou: fechou
+            # senao mantem Closing (ainda em curso)
+        elif _shutter == 'Opening':
+            if estado_fisico == 'Open':
+                _shutter = 'Open'        # confirmou: abriu
+            # senao mantem Opening
+        else:
+            _shutter = estado_fisico     # estado estavel: segue o sensor
         _connected  = True
         _modo_cloud = via_cloud
         _status_ts  = time.time()
@@ -381,14 +393,37 @@ def enviar_comando(comando, origem='nina'):
 def _tempo_curso():
     """Tempo de espera apos comando: door_time_1 do dispositivo + margem."""
     with _state_lock:
-        return _door_time + 3
+        # Margem sobre o door_time configurado. Curso real medido ~15s;
+        # piso de 20s da folga para variacao (frio, atrito) sem encurtar.
+        # O polling de confirmacao (_confirmar_transicao) tolera variacao.
+        return max(_door_time, 20) + 3
 
 
 def _agendar_refresh(segundos):
-    """Refresh de status apos o tempo de curso, em background."""
+    """Compat: dispara o polling de confirmacao (ignora 'segundos', que era
+    a leitura unica antiga)."""
+    _confirmar_transicao()
+
+
+def _confirmar_transicao():
+    """Apos um comando, faz poll do sensor a cada 2s ate o estado transitorio
+    (Opening/Closing) ser confirmado pelo sensor fisico, ou ate o timeout.
+    Timeout generoso (curso real ~15s + margem). Substitui a leitura unica,
+    que perdia o momento quando o curso era maior que o estimado."""
     def _job():
-        time.sleep(segundos)
-        ler_status()
+        limite = time.time() + 30  # teto de 30s para confirmar
+        while time.time() < limite:
+            ler_status()
+            with _state_lock:
+                transitorio = _shutter in ('Opening', 'Closing')
+            if not transitorio:
+                return  # sensor confirmou o estado final
+            time.sleep(2)
+        # Timeout: o sensor nunca confirmou. Loga para diagnostico.
+        with _state_lock:
+            s = _shutter
+        log.warning(f'Transicao nao confirmada em 30s (estado={s}). '
+                    f'Possivel obstrucao, falha mecanica ou curso muito longo.')
     threading.Thread(target=_job, daemon=True).start()
 
 # ---------------------------------------------------------------------------
@@ -567,8 +602,13 @@ def shutdown():
         _fechar_device(_device_atual())
 
     def _encerrar():
-        time.sleep(0.3)  # da tempo da resposta HTTP voltar
-        os._exit(0)      # encerra o processo imediatamente, sem reaproveitar
+        time.sleep(0.3)  # da tempo da resposta HTTP voltar ao cliente (GUI)
+        # os._exit(0) e INTENCIONAL: encerra o processo imediatamente sem
+        # rodar finalizadores nem esperar as threads do Flask/poll/discovery
+        # (todas daemon). sys.exit() nao serve aqui porque so encerra a thread
+        # atual, deixando o servidor Flask e o poll vivos. O socket local ja
+        # foi fechado acima (_fechar_device), entao nao ha recurso pendente.
+        os._exit(0)
 
     threading.Thread(target=_encerrar, daemon=True).start()
     return jsonify({'ok': True, 'message': 'driver encerrando'})

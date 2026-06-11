@@ -21,7 +21,11 @@ import subprocess
 #
 # Invariante: quando o driver esta vivo, a GUI NUNCA cria tinytuya.Device
 # para a cobertura - fala HTTP com o driver. Isso garante um unico dono do
-# socket local. Comando sempre via door_control_1 (DPS 6), nunca switch_1.
+# socket local.
+#
+# Comando da cobertura via switch_1 / DPS 1: True=abrir, False=fechar.
+# door_control_1 / DPS 6 e ACEITO mas IGNORADO por este firmware (MS-109) -
+# confirmado por camera em 2026-06-10. Status lido sempre do DPS 3.
 #
 # Regua: permanece tinytuya direto (dispositivo separado, socket proprio,
 # nao critico). Sem cascata de driver.
@@ -247,11 +251,22 @@ def _local_status():
             pass
 
 
+def _comando_para_dps1(comando):
+    """Converte 'abrir'/'fechar' no booleano do switch_1 (DPS 1).
+    Lanca ValueError para qualquer outra string - evita que erro de
+    digitacao vire fechamento silencioso."""
+    if comando == 'abrir':
+        return True
+    if comando == 'fechar':
+        return False
+    raise ValueError(f'Comando invalido: {comando!r}')
+
+
 def _local_comando(comando):
     """Envia comando via local direto usando switch_1 (DPS 1, booleano absoluto).
     True=abrir, False=fechar. Abre e FECHA explicitamente. Lanca excecao em falha.
     Nota: door_control_1 (DPS 6) e ignorado por este firmware (MS-109)."""
-    valor = True if comando == 'abrir' else False
+    valor = _comando_para_dps1(comando)
     d = tinytuya.Device(dev_id=COB_ID, address=COB_IP, local_key=COB_KEY, version=3.4)
     d.set_socketPersistent(False)
     d.set_socketTimeout(1.5)
@@ -280,7 +295,7 @@ def _cloud_status():
 def _cloud_comando(comando):
     """Envia comando via cloud usando switch_1 (DPS 1, booleano absoluto).
     Lanca excecao em falha."""
-    valor = True if comando == 'abrir' else False
+    valor = _comando_para_dps1(comando)
     r = get_cloud().sendcommand(COB_ID, [{'code': 'switch_1', 'value': valor}])
     if not r.get('success'):
         raise RuntimeError(f'cloud sem sucesso: {r}')
@@ -361,27 +376,26 @@ def acao_cobertura(comando):
                 aberta_atual, modo = status_cobertura()
                 alvo_aberta = (comando == 'abrir')
 
-                # So envia o comando se o estado for diferente do alvo
-                if aberta_atual is None or aberta_atual != alvo_aberta:
-                    ok, modo = comando_cobertura(comando)
+                # Se ja esta no estado desejado, nao envia comando nem mostra
+                # transicao - apenas confirma o estado atual (espelha a
+                # supressao de comando redundante que o driver ja faz).
+                if aberta_atual is not None and aberta_atual == alvo_aberta:
+                    janela.after(0, lambda: atualizar_label_cobertura(aberta_atual, modo))
                 else:
-                    ok = True  # ja esta no estado desejado
+                    ok, modo = comando_cobertura(comando)
+                    transicao = 'abrindo...' if comando == 'abrir' else 'fechando...'
+                    janela.after(0, lambda: label_cob.config(text=transicao, fg=AMARELO))
 
-                sufixo = _sufixo_modo(modo)
-                transicao = 'abrindo...' if comando == 'abrir' else 'fechando...'
-                janela.after(0, lambda: label_cob.config(
-                    text=transicao, fg=AMARELO))
-
-                def verificar():
-                    time.sleep(13)  # door_time_1 (10s) + margem
-                    aberta2, modo2 = status_cobertura()
-                    # No fechar, da uma segunda chance se ainda aberta
-                    if comando == 'fechar' and aberta2 is True:
-                        time.sleep(8)
+                    def verificar():
+                        time.sleep(13)  # door_time_1 (10s) + margem
                         aberta2, modo2 = status_cobertura()
-                    janela.after(0, lambda: atualizar_label_cobertura(aberta2, modo2))
+                        # No fechar, da uma segunda chance se ainda aberta
+                        if comando == 'fechar' and aberta2 is True:
+                            time.sleep(8)
+                            aberta2, modo2 = status_cobertura()
+                        janela.after(0, lambda: atualizar_label_cobertura(aberta2, modo2))
 
-                threading.Thread(target=verificar, daemon=True).start()
+                    threading.Thread(target=verificar, daemon=True).start()
 
         except Exception:
             janela.after(0, lambda: label_cob.config(text='ERRO', fg=VERMELHO))
@@ -798,11 +812,23 @@ threading.Thread(target=loop_schedule, daemon=True).start()
 
 def _ao_fechar():
     """Fechar a GUI = desligar o controle do telhado. Encerra o driver
-    (se a GUI o subiu) e fecha a janela."""
+    (se a GUI o subiu) em thread separada para nao congelar a janela,
+    e destroi a janela ao final."""
     label_cob.config(text='encerrando...', fg=CINZA)
+    # Desabilita os botoes para evitar clique durante o encerramento
+    for b in (btn_abrir, btn_fechar, btn_atualizar):
+        try:
+            b.config(state='disabled')
+        except Exception:
+            pass
     janela.update_idletasks()
-    _encerrar_driver()
-    janela.destroy()
+
+    def _encerrar_e_fechar():
+        _encerrar_driver()
+        # destroy precisa rodar na thread da UI
+        janela.after(0, janela.destroy)
+
+    threading.Thread(target=_encerrar_e_fechar, daemon=True).start()
 
 
 janela.protocol('WM_DELETE_WINDOW', _ao_fechar)
