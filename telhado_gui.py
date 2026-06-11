@@ -559,6 +559,19 @@ def flash_feedback(label, msg, cor, duracao=2000):
     janela.after(duracao, lambda: label.config(text=''))
 
 
+def resumo_erro_cloud(resposta):
+    if not isinstance(resposta, dict):
+        return 'nuvem falhou'
+    codigo = resposta.get('code') or resposta.get('errorCode')
+    if codigo:
+        return f'nuvem {codigo}'
+    return 'nuvem falhou'
+
+
+def feedback_agendamento(label, msg, cor):
+    janela.after(0, lambda: flash_feedback(label, msg, cor))
+
+
 def iniciar_agendamento_salvo():
     schedule.clear()
     h_abrir  = config.get('agendamento', {}).get('abrir', '')
@@ -609,12 +622,12 @@ def formatar_hora(entry, label_feedback, config_key):
             from tuya_cloud import criar_timer
             acao = 'abrir' if config_key == 'abrir' else 'fechar'
             r = criar_timer(hora, acao)
-            if r.get('success'):
-                flash_feedback(label_feedback, "salvo na nuvem", VERDE)
+            if isinstance(r, dict) and r.get('success'):
+                feedback_agendamento(label_feedback, "salvo na nuvem", VERDE)
             else:
-                flash_feedback(label_feedback, "salvo local (nuvem falhou)", AMARELO)
+                feedback_agendamento(label_feedback, f"local ({resumo_erro_cloud(r)})", AMARELO)
         except Exception:
-            flash_feedback(label_feedback, "salvo local", AMARELO)
+            feedback_agendamento(label_feedback, "salvo local (erro nuvem)", AMARELO)
 
     threading.Thread(target=criar_na_nuvem, daemon=True).start()
 

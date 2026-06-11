@@ -286,7 +286,8 @@ Edite o `config.json` com os dados dos seus dispositivos Tuya:
     "region":     "us",
     "api_key":    "ACCESS_ID_DA_TUYA",
     "api_secret": "ACCESS_SECRET_DA_TUYA",
-    "timezone":   "America/Sao_Paulo"
+    "timezone":   "America/Sao_Paulo",
+    "timer_category": "schedule"
   },
   "agendamento": {
     "abrir":  "",

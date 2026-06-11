@@ -19,7 +19,8 @@
     "region":     "us",
     "api_key":    "SEU_API_KEY_AQUI",
     "api_secret": "SEU_API_SECRET_AQUI",
-    "timezone":   "America/Sao_Paulo"
+    "timezone":   "America/Sao_Paulo",
+    "timer_category": "schedule"
   },
   "agendamento": {
     "abrir":  "",
