@@ -158,7 +158,6 @@ No NINA: Equipment → Dome → seleciona `Pier 1 Tuya Dome @ 127.0.0.1 #0`
 | `dome_driver.py` | Driver ASCOM Alpaca para NINA |
 | `servidor.py` | Painel web Flask |
 | `tuya_cloud.py` | Módulo API Tuya Cloud |
-| `telhado.py` | Controle via linha de comando |
 | `TELHADO_PIER1.bat` | Atalho para a interface gráfica |
 | `config_exemplo.json` | Template de configuração (copiar para config.json) |
 
