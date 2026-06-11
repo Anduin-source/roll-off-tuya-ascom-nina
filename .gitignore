@@ -38,3 +38,21 @@ Thumbs.db
 *.tmp
 *.bak
 *.swp
+
+# Saidas de scan / wizard do tinytuya - contem credenciais
+snapshot.json
+tinytuya.json
+tuya-raw.json
+*.snapshot.json
+
+# Backups locais
+*_backup*.py
+*.old.py
+*_old.py
+*.bak
+dome_driver_v*.py
+servidor_backup_*.py
+
+# Atalhos locais do Windows
+*.lnk
+desktop.ini
