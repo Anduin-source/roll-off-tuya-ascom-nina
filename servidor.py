@@ -99,10 +99,11 @@ def api_dispositivos():
 @app.route('/api/acao/<device_id>/<comando>')
 def api_acao(device_id, comando):
     """
-    Envia comando via cloud usando door_control_1 (DPS 6, enum open/close).
+    Envia comando via cloud usando switch_1 (DPS 1, booleano absoluto).
+    door_control_1 (DPS 6) e aceito mas ignorado pelo firmware MS-109.
     Fechar: direto. Abrir: confirmacao exigida no frontend.
 
-    Nao usa tinytuya.Device nem conexao local — invariante arquitetural:
+    Nao usa tinytuya.Device nem conexao local - invariante arquitetural:
     somente dome_driver.py abre socket local com o MS-109.
     """
     coberturas = carregar_coberturas()
@@ -113,10 +114,10 @@ def api_acao(device_id, comando):
         return jsonify({'erro': 'Comando invalido'}), 400
     try:
         c = get_cloud()
-        tuya_cmd = 'open' if comando == 'abrir' else 'close'
+        valor = True if comando == 'abrir' else False
         result = c.sendcommand(
             device_id,
-            [{'code': 'door_control_1', 'value': tuya_cmd}]
+            [{'code': 'switch_1', 'value': valor}]
         )
         if result.get('success'):
             return jsonify({
