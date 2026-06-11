@@ -519,10 +519,11 @@ def abrir_simples():
     """Abertura para a GUI."""
     ok, via = enviar_comando('open', origem='gui')
     if ok:
-        with _state_lock:
-            global _shutter
-            _shutter = 'Opening'
-        _agendar_refresh(_tempo_curso())
+        if via != 'cache':
+            with _state_lock:
+                global _shutter
+                _shutter = 'Opening'
+            _agendar_refresh(_tempo_curso())
         return jsonify({'ok': True, 'via': via})
     return jsonify({'ok': False, 'erro': via}), 500
 
@@ -532,18 +533,18 @@ def fechar_simples():
     """Fechamento para a GUI."""
     ok, via = enviar_comando('close', origem='gui')
     if ok:
-        with _state_lock:
-            global _shutter
-            _shutter = 'Closing'
-        _agendar_refresh(_tempo_curso())
+        if via != 'cache':
+            with _state_lock:
+                global _shutter
+                _shutter = 'Closing'
+            _agendar_refresh(_tempo_curso())
         return jsonify({'ok': True, 'via': via})
     return jsonify({'ok': False, 'erro': via}), 500
 
 
 @app.route('/emergency_close', methods=['POST'])
 def emergency_close():
-    """Fechamento garantido com verificacao. Bloqueia ate confirmar
-    (ou esgotar os caminhos). Integracao futura: nobreak."""
+    """Fechamento de emergencia com verificacao."""
     resultado = executar_emergency_close()
     codigo = 200 if resultado['ok'] else 500
     return jsonify(resultado), codigo
@@ -620,10 +621,11 @@ def get_shutter_status():
 def open_shutter():
     ok, via = enviar_comando('open', origem='nina')
     if ok:
-        with _state_lock:
-            global _shutter
-            _shutter = 'Opening'
-        _agendar_refresh(_tempo_curso())
+        if via != 'cache':
+            with _state_lock:
+                global _shutter
+                _shutter = 'Opening'
+            _agendar_refresh(_tempo_curso())
         return jsonify({'ErrorNumber': 0, 'ErrorMessage': ''})
     return jsonify({'ErrorNumber': 1, 'ErrorMessage': via})
 
@@ -632,10 +634,11 @@ def open_shutter():
 def close_shutter():
     ok, via = enviar_comando('close', origem='nina')
     if ok:
-        with _state_lock:
-            global _shutter
-            _shutter = 'Closing'
-        _agendar_refresh(_tempo_curso())
+        if via != 'cache':
+            with _state_lock:
+                global _shutter
+                _shutter = 'Closing'
+            _agendar_refresh(_tempo_curso())
         return jsonify({'ErrorNumber': 0, 'ErrorMessage': ''})
     return jsonify({'ErrorNumber': 1, 'ErrorMessage': via})
 
