@@ -13,7 +13,7 @@ CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.j
 def carregar_config():
     if not os.path.exists(CONFIG_FILE):
         print("ERRO: config.json nÃ£o encontrado.")
-        print("Copie config.exemplo.json para config.json e preencha suas credenciais.")
+        print("Copie config_exemplo.json para config.json e preencha suas credenciais.")
         sys.exit(1)
     with open(CONFIG_FILE, 'r') as f:
         return json.load(f)

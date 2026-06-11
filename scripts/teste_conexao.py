@@ -25,18 +25,23 @@ IMPORTANTE: rodar com o dome_driver.py PARADO (Ctrl+C), senao havera dois
 clientes competindo pelo socket e o teste fica contaminado.
 
 Uso:
-    python teste_conexao.py        # 20 leituras por modo (~20 min total)
-    python teste_conexao.py 30     # 30 leituras por modo (~30 min total)
+    python scripts/teste_conexao.py        # 20 leituras por modo (~20 min total)
+    python scripts/teste_conexao.py 30     # 30 leituras por modo (~30 min total)
 """
 
-import ipv4_first  # IPv4 preferencial
-import tinytuya
 import json
 import os
 import sys
 import time
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_DIR not in sys.path:
+    sys.path.insert(0, PROJECT_DIR)
+
+import ipv4_first  # IPv4 preferencial
+import tinytuya
+
+BASE_DIR = PROJECT_DIR
 cfg = json.load(open(os.path.join(BASE_DIR, 'config.json'), encoding='utf-8'))
 
 COB_ID  = cfg['cobertura']['id']

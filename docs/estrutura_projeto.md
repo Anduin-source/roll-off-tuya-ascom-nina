@@ -14,7 +14,6 @@ Arquivos principais:
 - dome_driver.py
 - servidor.py
 - tuya_cloud.py
-- telhado.py
 - ipv4_first.py
 
 Configuracao:
@@ -78,12 +77,6 @@ Responsabilidades:
 ### tuya_cloud.py
 
 Funcoes auxiliares para integracao com a API Tuya Cloud.
-
-### telhado.py
-
-Controle por linha de comando.
-
-Pode ser usado para testes simples ou operacao manual por terminal.
 
 ### ipv4_first.py
 

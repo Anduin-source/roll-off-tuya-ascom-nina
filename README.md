@@ -48,7 +48,6 @@ GUI encerra o driver que iniciou
 | `dome_driver.py`            | Driver ASCOM Alpaca para integração com NINA                              |
 | `servidor.py`               | Painel web Flask para visualização/controle administrativo das coberturas |
 | `tuya_cloud.py`             | Funções auxiliares para API Tuya Cloud                                    |
-| `telhado.py`                | Controle via linha de comando                                             |
 | `ipv4_first.py`             | Preferência IPv4 para evitar atrasos em redes com IPv6 problemático       |
 | `config_exemplo.json`       | Modelo de configuração local                                              |
 | `requirements.txt`          | Dependências Python do projeto                                            |
