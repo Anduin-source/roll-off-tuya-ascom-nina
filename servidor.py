@@ -6,8 +6,18 @@ import os
 
 app = Flask(__name__)
 
-CONFIG_FILE = os.path.join(os.path.dirname(__file__), 'config.json')
-DEVICES_FILE = os.path.join(os.path.dirname(__file__), 'devices.json')
+import sys
+
+# Quando compilado pelo PyInstaller (sys.frozen=True), os arquivos de dados
+# (config.json, devices.json) ficam ao lado do .exe (sys.executable).
+# Em modo Python puro, ficam ao lado do .py (__file__).
+if getattr(sys, 'frozen', False):
+    _BASE_DIR = os.path.dirname(sys.executable)
+else:
+    _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+CONFIG_FILE = os.path.join(_BASE_DIR, 'config.json')
+DEVICES_FILE = os.path.join(_BASE_DIR, 'devices.json')
 
 # ---------------------------------------------------------------------------
 # Carregamento de configuracao e dispositivos
