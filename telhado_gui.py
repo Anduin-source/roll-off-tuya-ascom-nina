@@ -572,6 +572,23 @@ def feedback_agendamento(label, msg, cor):
     janela.after(0, lambda: flash_feedback(label, msg, cor))
 
 
+def texto_agendamento_local():
+    ag = config.get('agendamento', {})
+    horarios = []
+    if ag.get('abrir'):
+        horarios.append(f"abrir {ag['abrir']}")
+    if ag.get('fechar'):
+        horarios.append(f"fechar {ag['fechar']}")
+    if not horarios:
+        return "sem agendamento local", CINZA
+    return "local ativo: " + " | ".join(horarios), AMARELO
+
+
+def atualizar_status_agendamento():
+    texto, cor = texto_agendamento_local()
+    label_agendamento_status.config(text=texto, fg=cor)
+
+
 def iniciar_agendamento_salvo():
     schedule.clear()
     h_abrir  = config.get('agendamento', {}).get('abrir', '')
@@ -597,6 +614,7 @@ def formatar_hora(entry, label_feedback, config_key):
         config.setdefault('agendamento', {})[config_key] = ''
         salvar_config(config)
         iniciar_agendamento_salvo()
+        atualizar_status_agendamento()
         flash_feedback(label_feedback, "removido", AMARELO)
         return
 
@@ -616,6 +634,7 @@ def formatar_hora(entry, label_feedback, config_key):
     config.setdefault('agendamento', {})[config_key] = hora
     salvar_config(config)
     iniciar_agendamento_salvo()
+    atualizar_status_agendamento()
 
     def criar_na_nuvem():
         try:
@@ -777,6 +796,10 @@ campo_fechar = HorarioEditavel(col_fechar, 'fechar', label_feedback_fechar)
 campo_fechar.pack(anchor='w', pady=(2, 2))
 label_feedback_fechar.pack(anchor='w')
 
+label_agendamento_status = tk.Label(card_cob, text="", font=('Segoe UI', 8),
+                                    bg=BG_CARD, fg=CINZA)
+label_agendamento_status.pack(anchor='w', padx=16, pady=(4, 0))
+
 tk.Label(card_cob, text="Clique no horario para editar - Enter para salvar",
          font=('Segoe UI', 8), bg=BG_CARD, fg=CINZA).pack(
          anchor='w', padx=16, pady=(8, 14))
@@ -820,6 +843,7 @@ tk.Frame(card_reg, bg=BG_CARD, height=12).pack()
 
 threading.Thread(target=get_cloud, daemon=True).start()
 iniciar_agendamento_salvo()
+atualizar_status_agendamento()
 threading.Thread(target=loop_schedule, daemon=True).start()
 
 
