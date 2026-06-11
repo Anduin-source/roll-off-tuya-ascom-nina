@@ -194,7 +194,7 @@ def get_cloud():
     return _cloud
 
 # ---------------------------------------------------------------------------
-# Leitura de status (local persistente -> fallback cloud)
+# Leitura de status (local abre-fecha -> fallback cloud)
 # ---------------------------------------------------------------------------
 
 def _aplicar_status(dps_aberta, door_time, alarm, via_cloud):
@@ -420,7 +420,7 @@ def executar_emergency_close():
     return {'ok': False, 'confirmada': False, 'tentativas': tentativas}
 
 # ---------------------------------------------------------------------------
-# Poll de status - tambem funciona como heartbeat da conexao persistente
+# Poll de status - 30s entre leituras (intervalo que motivou o abre-fecha)
 # ---------------------------------------------------------------------------
 
 def poll_status():
@@ -767,7 +767,7 @@ def get_name():
 @app.route('/api/v1/dome/0/description', methods=['GET'])
 def get_description():
     return jsonify({'Value': 'Driver Alpaca para cobertura Novadigital MS-109 '
-                             'via tinytuya (conexao persistente + cloud fallback)',
+                             'via tinytuya (local abre-fecha + cloud fallback)',
                     'ErrorNumber': 0, 'ErrorMessage': ''})
 
 
