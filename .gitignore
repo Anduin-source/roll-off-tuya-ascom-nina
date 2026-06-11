@@ -1,14 +1,48 @@
-# Credenciais e configuração local — nunca versionar
+# ============================================================
+# Credenciais e configuracao local - NUNCA versionar
+# ============================================================
 config.json
 devices.json
 
-# Logs e temporários Python
+# Saidas de scan / wizard do tinytuya - CONTEM local_key (credenciais!)
+snapshot.json
+tinytuya.json
+tuya-raw.json
+*.snapshot.json
+
+# ============================================================
+# Backups locais - nao poluir o repo (e podem conter credenciais)
+# ============================================================
+*_backup*.py
+*.old.py
+*_old.py
+*.bak
+dome_driver_v*.py
+servidor_backup_*.py
+
+# ============================================================
+# Atalhos e arquivos do Windows
+# ============================================================
+*.lnk
+Thumbs.db
+desktop.ini
+
+# ============================================================
+# Logs e temporarios Python
+# ============================================================
 __pycache__/
 *.py[cod]
 *.pyo
 *.log
 
+# ============================================================
 # Ambientes virtuais
+# ============================================================
 venv/
 .venv/
 env/
+
+# ============================================================
+# Repositorio aninhado acidental (se existir)
+# ============================================================
+pier-controle/
