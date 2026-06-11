@@ -633,6 +633,26 @@ def can_find_home():
     return jsonify({'Value': False, 'ErrorNumber': 0, 'ErrorMessage': ''})
 
 
+@app.route('/api/v1/dome/0/cansetshutter', methods=['GET'])
+def can_set_shutter():
+    # True - o driver controla abrir/fechar a cobertura.
+    # Sem isto, o NINA desabilita os botoes de Shutter no Manual Control
+    # e nao consegue fechar automaticamente por seguranca.
+    return jsonify({'Value': True, 'ErrorNumber': 0, 'ErrorMessage': ''})
+
+
+@app.route('/api/v1/dome/0/slaved', methods=['GET'])
+def get_slaved():
+    # Roll-off nao segue o telescopio (nao gira) - sempre False.
+    return jsonify({'Value': False, 'ErrorNumber': 0, 'ErrorMessage': ''})
+
+
+@app.route('/api/v1/dome/0/slaved', methods=['PUT'])
+def put_slaved():
+    # Aceita o comando sem erro, mas nao faz nada (nao ha azimute a seguir).
+    return jsonify({'ErrorNumber': 0, 'ErrorMessage': ''})
+
+
 @app.route('/api/v1/dome/0/altitude', methods=['GET'])
 def get_altitude():
     return jsonify({'Value': 0.0, 'ErrorNumber': 0, 'ErrorMessage': ''})
@@ -648,6 +668,65 @@ def is_moving():
     with _state_lock:
         moving = _shutter in ('Opening', 'Closing')
     return jsonify({'Value': moving, 'ErrorNumber': 0, 'ErrorMessage': ''})
+
+
+# --- Endpoints de movimento/park (roll-off nao gira nem estaciona) ---
+# Implementados para evitar 404 nos fluxos de coordenacao do NINA.
+# Operacoes nao suportadas retornam ErrorNumber 1024 (NotImplemented ASCOM),
+# nao um 404 HTTP, para o NINA tratar como capacidade ausente, nao como falha.
+
+ASCOM_NOT_IMPLEMENTED = 1024
+
+
+@app.route('/api/v1/dome/0/abortslew', methods=['PUT'])
+def abort_slew():
+    return jsonify({'ErrorNumber': 0, 'ErrorMessage': ''})
+
+
+@app.route('/api/v1/dome/0/park', methods=['PUT'])
+def park():
+    return jsonify({'ErrorNumber': ASCOM_NOT_IMPLEMENTED,
+                    'ErrorMessage': 'Roll-off nao estaciona em azimute'})
+
+
+@app.route('/api/v1/dome/0/setpark', methods=['PUT'])
+def set_park():
+    return jsonify({'ErrorNumber': ASCOM_NOT_IMPLEMENTED,
+                    'ErrorMessage': 'Roll-off nao tem posicao de park'})
+
+
+@app.route('/api/v1/dome/0/findhome', methods=['PUT'])
+def find_home_cmd():
+    return jsonify({'ErrorNumber': ASCOM_NOT_IMPLEMENTED,
+                    'ErrorMessage': 'Roll-off nao tem home'})
+
+
+@app.route('/api/v1/dome/0/slewtoazimuth', methods=['PUT'])
+def slew_to_azimuth():
+    return jsonify({'ErrorNumber': ASCOM_NOT_IMPLEMENTED,
+                    'ErrorMessage': 'Roll-off nao gira'})
+
+
+@app.route('/api/v1/dome/0/slewtoaltitude', methods=['PUT'])
+def slew_to_altitude():
+    return jsonify({'ErrorNumber': ASCOM_NOT_IMPLEMENTED,
+                    'ErrorMessage': 'Roll-off nao controla altitude'})
+
+
+@app.route('/api/v1/dome/0/synctoazimuth', methods=['PUT'])
+def sync_to_azimuth():
+    return jsonify({'ErrorNumber': ASCOM_NOT_IMPLEMENTED,
+                    'ErrorMessage': 'Roll-off nao gira'})
+
+
+@app.route('/api/v1/dome/0/atpark', methods=['GET'])
+def at_park():
+    return jsonify({'Value': False, 'ErrorNumber': 0, 'ErrorMessage': ''})
+
+
+@app.route('/api/v1/dome/0/athome', methods=['GET'])
+def at_home():
+    return jsonify({'Value': False, 'ErrorNumber': 0, 'ErrorMessage': ''})
 
 
 @app.route('/api/v1/dome/0/name', methods=['GET'])
