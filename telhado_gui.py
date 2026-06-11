@@ -1,4 +1,4 @@
-import ipv4_first  # IPv4 preferencial — ver ipv4_first.py
+import ipv4_first  # IPv4 preferencial - ver ipv4_first.py
 import tkinter as tk
 import tinytuya
 import threading
@@ -7,28 +7,51 @@ import time
 import json
 import os
 import sys
+import urllib.request
+
+# ===========================================================================
+# Pier 1 - Interface de controle (GUI)
+#
+# Cobertura: cascata de conexao em 3 niveis (Etapa 4 da arquitetura)
+#   1. DRIVER  - se dome_driver.py estiver rodando (HTTP localhost:11111)
+#   2. LOCAL   - conexao direta tinytuya, SOMENTE se o driver estiver ausente
+#                (abre e FECHA explicitamente - nunca abandona socket)
+#   3. CLOUD   - fallback final
+#
+# Invariante: quando o driver esta vivo, a GUI NUNCA cria tinytuya.Device
+# para a cobertura - fala HTTP com o driver. Isso garante um unico dono do
+# socket local. Comando sempre via door_control_1 (DPS 6), nunca switch_1.
+#
+# Regua: permanece tinytuya direto (dispositivo separado, socket proprio,
+# nao critico). Sem cascata de driver.
+# ===========================================================================
+
+DRIVER_URL = 'http://127.0.0.1:11111'
+DRIVER_TIMEOUT = 0.5   # conexao recusada e instantanea; 0.5s cobre driver lento
 
 # ---------------------------------------------------------------------------
-# ConfiguraÃ§Ã£o â€” lida de config.json (nÃ£o versionado)
+# Configuracao - lida de config.json (nao versionado)
 # ---------------------------------------------------------------------------
 
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
 
+
 def carregar_config():
     if not os.path.exists(CONFIG_FILE):
-        print("ERRO: config.json nÃ£o encontrado.")
-        print("Copie config.exemplo.json para config.json e preencha suas credenciais.")
+        print("ERRO: config.json nao encontrado.")
+        print("Copie config_exemplo.json para config.json e preencha suas credenciais.")
         sys.exit(1)
-    with open(CONFIG_FILE, 'r') as f:
+    with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
         return json.load(f)
 
+
 def salvar_config(cfg):
-    with open(CONFIG_FILE, 'w') as f:
-        json.dump(cfg, f, indent=2)
+    with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+        json.dump(cfg, f, indent=2, ensure_ascii=False)
+
 
 config = carregar_config()
 
-# Credenciais lidas do config.json
 COB_ID  = config['cobertura']['id']
 COB_IP  = config['cobertura']['ip']
 COB_KEY = config['cobertura']['key']
@@ -41,7 +64,6 @@ API_REGION = config['tuya_cloud']['region']
 API_KEY    = config['tuya_cloud']['api_key']
 API_SECRET = config['tuya_cloud']['api_secret']
 
-# Nomes das tomadas â€” lidos do config, com fallback para nomes padrÃ£o
 _switches_raw = config['regua'].get('switches', {})
 SWITCHES      = {int(k): v for k, v in _switches_raw.items()}
 SWITCH_CODES  = {1: 'switch_1', 2: 'switch_2', 3: 'switch_3', 4: 'switch_4'}
@@ -64,11 +86,12 @@ TEXTO_MUT = '#94a3b8'
 SEPARADOR = '#1e3a5f'
 
 # ---------------------------------------------------------------------------
-# ConexÃ£o cloud (singleton com lock para thread-safety)
+# Conexao cloud (singleton com lock)
 # ---------------------------------------------------------------------------
 
 _cloud      = None
 _cloud_lock = threading.Lock()
+
 
 def get_cloud():
     global _cloud
@@ -82,47 +105,148 @@ def get_cloud():
     return _cloud
 
 # ---------------------------------------------------------------------------
-# ConexÃ£o aos dispositivos
+# Camada de comunicacao da COBERTURA - cascata driver -> local -> cloud
 # ---------------------------------------------------------------------------
 
-def conectar_cobertura():
-    resultado = [None]
+def _driver_vivo():
+    """Testa se o dome_driver responde. Conexao recusada e instantanea
+    quando o driver nao esta rodando - nao ha timeout a esperar."""
+    try:
+        req = urllib.request.urlopen(DRIVER_URL + '/health', timeout=DRIVER_TIMEOUT)
+        return req.status == 200
+    except Exception:
+        return False
 
-    def tentar_local():
+
+def _driver_status():
+    """Le o status pelo driver. Retorna (aberta_bool_or_None, 'driver')."""
+    try:
+        req = urllib.request.urlopen(DRIVER_URL + '/status', timeout=2)
+        data = json.loads(req.read().decode())
+        estado = data.get('estado')
+        if estado == 'aberta':
+            return True, 'driver'
+        if estado == 'fechada':
+            return False, 'driver'
+        return None, 'driver'
+    except Exception:
+        return None, 'driver'
+
+
+def _driver_comando(comando):
+    """Envia abrir/fechar pelo driver. comando: 'abrir' ou 'fechar'.
+    Retorna True se aceito."""
+    try:
+        rota = '/abrir' if comando == 'abrir' else '/fechar'
+        req = urllib.request.Request(DRIVER_URL + rota, method='POST')
+        resp = urllib.request.urlopen(req, timeout=10)
+        data = json.loads(resp.read().decode())
+        return data.get('ok', False)
+    except Exception:
+        return False
+
+
+def _local_status():
+    """Le status via conexao local direta. Abre e FECHA explicitamente.
+    Retorna (aberta_bool_or_None). Lanca excecao em falha de conexao."""
+    d = tinytuya.Device(dev_id=COB_ID, address=COB_IP, local_key=COB_KEY, version=3.4)
+    d.set_socketPersistent(False)
+    d.set_socketTimeout(1.5)
+    try:
+        s = d.status()
+        if isinstance(s, dict) and 'dps' in s:
+            return bool(s['dps'].get('3', False))
+        raise RuntimeError(f'sem dps: {s}')
+    finally:
         try:
-            d = tinytuya.Device(dev_id=COB_ID, address=COB_IP,
-                                local_key=COB_KEY, version=3.4)
-            d.set_socketTimeout(0.5)
-            d.set_retry(False)
-            s = d.status()
-            if 'dps' in s:
-                resultado[0] = (d, 'local')
+            d.close()
         except Exception:
             pass
 
-    t = threading.Thread(target=tentar_local)
-    t.start()
-    t.join(timeout=1.5)
 
-    if resultado[0]:
-        return resultado[0]
-    return get_cloud(), 'cloud'
+def _local_comando(comando):
+    """Envia comando via local direto usando door_control_1 (DPS 6).
+    Abre e FECHA explicitamente. Lanca excecao em falha."""
+    valor = 'open' if comando == 'abrir' else 'close'
+    d = tinytuya.Device(dev_id=COB_ID, address=COB_IP, local_key=COB_KEY, version=3.4)
+    d.set_socketPersistent(False)
+    d.set_socketTimeout(1.5)
+    try:
+        r = d.set_value(6, valor)
+        if isinstance(r, dict) and 'Err' in r:
+            raise RuntimeError(f"Err {r['Err']}")
+        return True
+    finally:
+        try:
+            d.close()
+        except Exception:
+            pass
 
-def get_status_cobertura(dispositivo, modo):
+
+def _cloud_status():
+    """Le status via cloud. Retorna aberta_bool_or_None."""
+    s = get_cloud().getstatus(COB_ID)
+    if s and 'result' in s:
+        for item in s['result']:
+            if item.get('code') == 'doorcontact_state':
+                return bool(item.get('value', False))
+    return None
+
+
+def _cloud_comando(comando):
+    """Envia comando via cloud usando door_control_1. Lanca excecao em falha."""
+    valor = 'open' if comando == 'abrir' else 'close'
+    r = get_cloud().sendcommand(COB_ID, [{'code': 'door_control_1', 'value': valor}])
+    if not r.get('success'):
+        raise RuntimeError(f'cloud sem sucesso: {r}')
+    return True
+
+
+def status_cobertura():
+    """Le o status da cobertura pela cascata. Retorna (aberta, modo)."""
+    if _driver_vivo():
+        return _driver_status()
+    try:
+        return _local_status(), 'local'
+    except Exception:
+        pass
+    try:
+        return _cloud_status(), 'cloud'
+    except Exception:
+        return None, 'cloud'
+
+
+def comando_cobertura(comando):
+    """Envia abrir/fechar pela cascata. Retorna (ok, modo)."""
+    if _driver_vivo():
+        return _driver_comando(comando), 'driver'
+    try:
+        _local_comando(comando)
+        return True, 'local'
+    except Exception:
+        pass
+    try:
+        _cloud_comando(comando)
+        return True, 'cloud'
+    except Exception:
+        return False, 'cloud'
+
+# ---------------------------------------------------------------------------
+# Atualizacao do label da cobertura - fonte unica de verdade
+# ---------------------------------------------------------------------------
+
+def _sufixo_modo(modo):
+    if modo == 'driver':
+        return ''           # driver e o caminho normal, sem icone
     if modo == 'local':
-        s = dispositivo.status()
-        return s.get('dps', {}).get('3', False) if 'dps' in s else None
-    else:
-        s = dispositivo.getstatus(COB_ID)
-        dps = {}
-        if s and 'result' in s:
-            for item in s['result']:
-                dps[item['code']] = item['value']
-        return dps.get('doorcontact_state', None) if dps else None
+        return ' \U0001F50C'  # tomada (local direto, sem driver)
+    if modo == 'cloud':
+        return ' \U0001F4E1'  # antena (cloud)
+    return ''
+
 
 def atualizar_label_cobertura(aberta, modo):
-    """Ãšnica funÃ§Ã£o que escreve no label da cobertura â€” fonte de verdade."""
-    sufixo = ' ðŸ“¡' if modo == 'cloud' else ''
+    sufixo = _sufixo_modo(modo)
     if aberta is None:
         label_cob.config(text='ERRO', fg=VERMELHO)
     else:
@@ -130,38 +254,8 @@ def atualizar_label_cobertura(aberta, modo):
             text=('ABERTA' if aberta else 'FECHADA') + sufixo,
             fg=VERDE if aberta else AZUL)
 
-def conectar_regua():
-    resultado = [None]
-
-    def tentar_local():
-        try:
-            d = tinytuya.Device(dev_id=REG_ID, address=REG_IP,
-                                local_key=REG_KEY, version=3.4)
-            d.set_socketTimeout(0.5)
-            d.set_retry(False)
-            s = d.status()
-            if 'dps' in s:
-                resultado[0] = (d, 'local', s['dps'])
-        except Exception:
-            pass
-
-    t = threading.Thread(target=tentar_local)
-    t.start()
-    t.join(timeout=1.5)
-
-    if resultado[0]:
-        return resultado[0]
-
-    c = get_cloud()
-    s = c.getstatus(REG_ID)
-    dps = {}
-    if s and 'result' in s:
-        for item in s['result']:
-            dps[item['code']] = item['value']
-    return c, 'cloud', dps
-
 # ---------------------------------------------------------------------------
-# AÃ§Ãµes da cobertura
+# Acoes da cobertura
 # ---------------------------------------------------------------------------
 
 def acao_cobertura(comando):
@@ -172,63 +266,35 @@ def acao_cobertura(comando):
 
     def executar():
         try:
-            dispositivo, modo = conectar_cobertura()
-            aberta = get_status_cobertura(dispositivo, modo)
-            sufixo = ' ðŸ“¡' if modo == 'cloud' else ''
-
             if comando == 'status':
+                aberta, modo = status_cobertura()
                 janela.after(0, lambda: atualizar_label_cobertura(aberta, modo))
 
-            elif comando == 'abrir':
-                if aberta is None:
-                    janela.after(0, lambda: atualizar_label_cobertura(None, modo))
+            elif comando in ('abrir', 'fechar'):
+                aberta_atual, modo = status_cobertura()
+                alvo_aberta = (comando == 'abrir')
+
+                # So envia o comando se o estado for diferente do alvo
+                if aberta_atual is None or aberta_atual != alvo_aberta:
+                    ok, modo = comando_cobertura(comando)
                 else:
-                    if aberta is False:
-                        if modo == 'local':
-                            dispositivo.set_value(1, True)
-                        else:
-                            dispositivo.sendcommand(COB_ID, {'commands': [{'code': 'switch_1', 'value': True}]})
-                    janela.after(0, lambda: label_cob.config(
-                        text='abrindo...' + sufixo, fg=AMARELO))
+                    ok = True  # ja esta no estado desejado
 
-                    def verificar_abrir():
-                        time.sleep(12)
-                        try:
-                            d2, m2 = conectar_cobertura()
-                            aberta2 = get_status_cobertura(d2, m2)
-                            janela.after(0, lambda: atualizar_label_cobertura(aberta2, m2))
-                        except Exception:
-                            pass
+                sufixo = _sufixo_modo(modo)
+                transicao = 'abrindo...' if comando == 'abrir' else 'fechando...'
+                janela.after(0, lambda: label_cob.config(
+                    text=transicao + sufixo, fg=AMARELO))
 
-                    threading.Thread(target=verificar_abrir, daemon=True).start()
+                def verificar():
+                    time.sleep(13)  # door_time_1 (10s) + margem
+                    aberta2, modo2 = status_cobertura()
+                    # No fechar, da uma segunda chance se ainda aberta
+                    if comando == 'fechar' and aberta2 is True:
+                        time.sleep(8)
+                        aberta2, modo2 = status_cobertura()
+                    janela.after(0, lambda: atualizar_label_cobertura(aberta2, modo2))
 
-            elif comando == 'fechar':
-                if aberta is None:
-                    janela.after(0, lambda: atualizar_label_cobertura(None, modo))
-                else:
-                    if aberta is True:
-                        if modo == 'local':
-                            dispositivo.set_value(1, False)
-                        else:
-                            dispositivo.sendcommand(COB_ID, {'commands': [{'code': 'switch_1', 'value': False}]})
-                    janela.after(0, lambda: label_cob.config(
-                        text='fechando...' + sufixo, fg=AMARELO))
-
-                    def verificar_fechar():
-                        time.sleep(12)
-                        try:
-                            d2, m2 = conectar_cobertura()
-                            aberta2 = get_status_cobertura(d2, m2)
-                            if aberta2 is True:
-                                time.sleep(8)
-                                d3, m3 = conectar_cobertura()
-                                aberta2 = get_status_cobertura(d3, m3)
-                                m2 = m3
-                            janela.after(0, lambda: atualizar_label_cobertura(aberta2, m2))
-                        except Exception:
-                            pass
-
-                    threading.Thread(target=verificar_fechar, daemon=True).start()
+                threading.Thread(target=verificar, daemon=True).start()
 
         except Exception:
             janela.after(0, lambda: label_cob.config(text='ERRO', fg=VERMELHO))
@@ -239,34 +305,64 @@ def acao_cobertura(comando):
 
     threading.Thread(target=executar, daemon=True).start()
 
+
 def abrir_agendado():
     try:
-        dispositivo, modo = conectar_cobertura()
-        aberta = get_status_cobertura(dispositivo, modo)
+        aberta, _ = status_cobertura()
         if not aberta:
-            if modo == 'local':
-                dispositivo.set_value(1, True)
-            else:
-                dispositivo.sendcommand(COB_ID, {'commands': [{'code': 'switch_1', 'value': True}]})
-            janela.after(0, lambda: label_cob.config(text='ABERTA', fg=VERDE))
+            ok, modo = comando_cobertura('abrir')
+            if ok:
+                janela.after(0, lambda: label_cob.config(
+                    text='ABERTA' + _sufixo_modo(modo), fg=VERDE))
     except Exception:
         pass
 
+
 def fechar_agendado():
     try:
-        dispositivo, modo = conectar_cobertura()
-        aberta = get_status_cobertura(dispositivo, modo)
+        aberta, _ = status_cobertura()
         if aberta:
-            if modo == 'local':
-                dispositivo.set_value(1, False)
-            else:
-                dispositivo.sendcommand(COB_ID, {'commands': [{'code': 'switch_1', 'value': False}]})
-            janela.after(0, lambda: label_cob.config(text='FECHADA', fg=AZUL))
+            ok, modo = comando_cobertura('fechar')
+            if ok:
+                janela.after(0, lambda: label_cob.config(
+                    text='FECHADA' + _sufixo_modo(modo), fg=AZUL))
     except Exception:
         pass
 
 # ---------------------------------------------------------------------------
-# AÃ§Ãµes da rÃ©gua
+# Conexao da REGUA (tinytuya direto - dispositivo separado, nao critico)
+# ---------------------------------------------------------------------------
+
+def conectar_regua():
+    """Local primeiro (abre/fecha explicito), cloud como fallback.
+    Retorna (dispositivo, modo, dps). Em modo local, o CHAMADOR e
+    responsavel por fechar o dispositivo apos o uso."""
+    d = tinytuya.Device(dev_id=REG_ID, address=REG_IP, local_key=REG_KEY, version=3.4)
+    d.set_socketPersistent(False)
+    d.set_socketTimeout(1.5)
+    try:
+        s = d.status()
+        if isinstance(s, dict) and 'dps' in s:
+            return d, 'local', s['dps']   # chamador fecha 'd' no finally dele
+    except Exception:
+        pass
+
+    # Local falhou - fecha o device antes de cair para cloud
+    try:
+        d.close()
+    except Exception:
+        pass
+
+    c = get_cloud()
+    s = c.getstatus(REG_ID)
+    dps = {}
+    if s and 'result' in s:
+        for item in s['result']:
+            dps[item['code']] = item['value']
+    return c, 'cloud', dps
+
+# ---------------------------------------------------------------------------
+# Acoes da regua
 # ---------------------------------------------------------------------------
 
 def acao_regua(switch_num, comando):
@@ -275,9 +371,10 @@ def acao_regua(switch_num, comando):
     labels_regua[switch_num].config(text='...', fg=CINZA)
 
     def executar():
+        dispositivo = None
         try:
             dispositivo, modo, dps = conectar_regua()
-            sufixo = ' ðŸ“¡' if modo == 'cloud' else ''
+            sufixo = ' \U0001F4E1' if modo == 'cloud' else ''
             code   = SWITCH_CODES[switch_num]
 
             if comando == 'status':
@@ -290,27 +387,57 @@ def acao_regua(switch_num, comando):
                 if modo == 'local':
                     dispositivo.set_value(switch_num, True)
                 else:
-                    dispositivo.sendcommand(REG_ID, {'commands': [{'code': code, 'value': True}]})
+                    dispositivo.sendcommand(REG_ID, [{'code': code, 'value': True}])
                 labels_regua[switch_num].config(text='ON' + sufixo, fg=VERDE)
 
             elif comando == 'desligar':
                 if modo == 'local':
                     dispositivo.set_value(switch_num, False)
                 else:
-                    dispositivo.sendcommand(REG_ID, {'commands': [{'code': code, 'value': False}]})
+                    dispositivo.sendcommand(REG_ID, [{'code': code, 'value': False}])
                 labels_regua[switch_num].config(text='OFF' + sufixo, fg=CINZA)
 
         except Exception:
             labels_regua[switch_num].config(text='ERRO', fg=VERMELHO)
+        finally:
+            # fecha conexao local da regua se foi local
+            if dispositivo is not None and hasattr(dispositivo, 'close'):
+                try:
+                    dispositivo.close()
+                except Exception:
+                    pass
 
         if comando in botoes_regua[switch_num]:
             botoes_regua[switch_num][comando].config(state='normal')
 
     threading.Thread(target=executar, daemon=True).start()
 
+
 def status_todos_regua():
-    for sw in SWITCHES:
-        acao_regua(sw, 'status')
+    """Status das 4 tomadas. Em modo cloud, 1 chamada cobre todas."""
+    # Tenta uma leitura unica primeiro (1 conexao para os 4 switches)
+    def executar():
+        dispositivo = None
+        try:
+            dispositivo, modo, dps = conectar_regua()
+            sufixo = ' \U0001F4E1' if modo == 'cloud' else ''
+            for sw in SWITCHES:
+                code = SWITCH_CODES[sw]
+                ligado = dps.get(str(sw), False) if modo == 'local' else dps.get(code, False)
+                lbl = labels_regua[sw]
+                lbl.config(text=('ON' if ligado else 'OFF') + sufixo,
+                           fg=VERDE if ligado else CINZA)
+        except Exception:
+            for sw in SWITCHES:
+                labels_regua[sw].config(text='ERRO', fg=VERMELHO)
+        finally:
+            if dispositivo is not None and hasattr(dispositivo, 'close'):
+                try:
+                    dispositivo.close()
+                except Exception:
+                    pass
+
+    threading.Thread(target=executar, daemon=True).start()
 
 # ---------------------------------------------------------------------------
 # Agendamento
@@ -325,9 +452,11 @@ def validar_hora(hora_str):
     except Exception:
         return False
 
+
 def flash_feedback(label, msg, cor, duracao=2000):
     label.config(text=msg, fg=cor)
     janela.after(duracao, lambda: label.config(text=''))
+
 
 def iniciar_agendamento_salvo():
     schedule.clear()
@@ -340,10 +469,12 @@ def iniciar_agendamento_salvo():
         schedule.every().day.at(h_fechar).do(
             lambda: threading.Thread(target=fechar_agendado, daemon=True).start())
 
+
 def loop_schedule():
     while True:
         schedule.run_pending()
         time.sleep(10)
+
 
 def formatar_hora(entry, label_feedback, config_key):
     val = entry.get().replace(':', '').strip()
@@ -358,12 +489,12 @@ def formatar_hora(entry, label_feedback, config_key):
     if len(val) == 3:
         val = '0' + val
     if len(val) != 4 or not val.isdigit():
-        flash_feedback(label_feedback, "use 4 dÃ­gitos: HHMM", VERMELHO)
+        flash_feedback(label_feedback, "use 4 digitos: HHMM", VERMELHO)
         return
 
     hora = val[:2] + ':' + val[2:]
     if not validar_hora(hora):
-        flash_feedback(label_feedback, "hora invÃ¡lida", VERMELHO)
+        flash_feedback(label_feedback, "hora invalida", VERMELHO)
         return
 
     entry.delete(0, tk.END)
@@ -378,7 +509,7 @@ def formatar_hora(entry, label_feedback, config_key):
             acao = 'abrir' if config_key == 'abrir' else 'fechar'
             r = criar_timer(hora, acao)
             if r.get('success'):
-                flash_feedback(label_feedback, "salvo na nuvem âœ“", VERDE)
+                flash_feedback(label_feedback, "salvo na nuvem", VERDE)
             else:
                 flash_feedback(label_feedback, "salvo local (nuvem falhou)", AMARELO)
         except Exception:
@@ -396,8 +527,10 @@ def btn_estilo(parent, texto, cor_bg, cor_fg, cmd):
                      font=('Segoe UI', 10, 'bold'), relief='flat',
                      padx=16, pady=7, cursor='hand2', bd=0)
 
+
 def separador(parent):
     tk.Frame(parent, bg=SEPARADOR, height=1).pack(fill='x', padx=16, pady=8)
+
 
 class HorarioEditavel:
     def __init__(self, parent, config_key, label_feedback):
@@ -463,14 +596,14 @@ class HorarioEditavel:
 # ---------------------------------------------------------------------------
 
 janela = tk.Tk()
-janela.title("Pier 1 â€” Controle")
+janela.title("Pier 1 - Controle")
 janela.configure(bg=BG)
 janela.geometry("420x660")
 janela.resizable(False, False)
 
-tk.Label(janela, text="ðŸ”­ Pier 1", font=('Segoe UI', 15, 'bold'),
+tk.Label(janela, text="\U0001F52D Pier 1", font=('Segoe UI', 15, 'bold'),
          bg=BG, fg=TEXTO).pack(pady=(18, 2))
-tk.Label(janela, text="ObservatÃ³rio Munhoz", font=('Segoe UI', 10),
+tk.Label(janela, text="Observatorio Munhoz", font=('Segoe UI', 10),
          bg=BG, fg=TEXTO_MUT).pack(pady=(0, 14))
 
 # Card cobertura
@@ -490,13 +623,13 @@ frame_btn_cob.pack(pady=(0, 6))
 
 btn_abrir    = btn_estilo(frame_btn_cob, "Abrir",  '#166534', VERDE, lambda: acao_cobertura('abrir'))
 btn_fechar   = btn_estilo(frame_btn_cob, "Fechar", '#1e3a5f', AZUL,  lambda: acao_cobertura('fechar'))
-btn_atualizar = btn_estilo(frame_btn_cob, "â†º",    '#2a2a2a', TEXTO_MUT, lambda: acao_cobertura('status'))
+btn_atualizar = btn_estilo(frame_btn_cob, "\u21BA",    '#2a2a2a', TEXTO_MUT, lambda: acao_cobertura('status'))
 
 btn_abrir.grid(row=0, column=0, padx=6)
 btn_fechar.grid(row=0, column=1, padx=6)
 btn_atualizar.grid(row=0, column=2, padx=6)
 
-tk.Label(card_cob, text="â†º sincroniza o status com o dispositivo",
+tk.Label(card_cob, text="\u21BA sincroniza o status com o dispositivo",
          font=('Segoe UI', 7), bg=BG_CARD, fg=CINZA).pack(pady=(2, 6))
 
 separador(card_cob)
@@ -525,16 +658,16 @@ campo_fechar = HorarioEditavel(col_fechar, 'fechar', label_feedback_fechar)
 campo_fechar.pack(anchor='w', pady=(2, 2))
 label_feedback_fechar.pack(anchor='w')
 
-tk.Label(card_cob, text="Clique no horÃ¡rio para editar Â· Enter para salvar",
+tk.Label(card_cob, text="Clique no horario para editar - Enter para salvar",
          font=('Segoe UI', 8), bg=BG_CARD, fg=CINZA).pack(
          anchor='w', padx=16, pady=(8, 14))
 
-# Card rÃ©gua
+# Card regua
 card_reg = tk.Frame(janela, bg=BG_CARD, bd=0,
                     highlightthickness=1, highlightbackground=BG_BTN)
 card_reg.pack(fill='x', padx=20, pady=(0, 12))
 
-tk.Label(card_reg, text="RÃ‰GUA", font=('Segoe UI', 9, 'bold'),
+tk.Label(card_reg, text="REGUA", font=('Segoe UI', 9, 'bold'),
          bg=BG_CARD, fg=TEXTO_MUT).pack(anchor='w', padx=16, pady=(12, 8))
 
 labels_regua  = {}
@@ -563,7 +696,7 @@ for sw, nome in SWITCHES.items():
 tk.Frame(card_reg, bg=BG_CARD, height=10).pack()
 
 # ---------------------------------------------------------------------------
-# InicializaÃ§Ã£o
+# Inicializacao
 # ---------------------------------------------------------------------------
 
 threading.Thread(target=get_cloud, daemon=True).start()
