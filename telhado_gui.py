@@ -165,14 +165,15 @@ def _local_status():
 
 
 def _local_comando(comando):
-    """Envia comando via local direto usando door_control_1 (DPS 6).
-    Abre e FECHA explicitamente. Lanca excecao em falha."""
-    valor = 'open' if comando == 'abrir' else 'close'
+    """Envia comando via local direto usando switch_1 (DPS 1, booleano absoluto).
+    True=abrir, False=fechar. Abre e FECHA explicitamente. Lanca excecao em falha.
+    Nota: door_control_1 (DPS 6) e ignorado por este firmware (MS-109)."""
+    valor = True if comando == 'abrir' else False
     d = tinytuya.Device(dev_id=COB_ID, address=COB_IP, local_key=COB_KEY, version=3.4)
     d.set_socketPersistent(False)
     d.set_socketTimeout(1.5)
     try:
-        r = d.set_value(6, valor)
+        r = d.set_value(1, valor)
         if isinstance(r, dict) and 'Err' in r:
             raise RuntimeError(f"Err {r['Err']}")
         return True
@@ -194,9 +195,10 @@ def _cloud_status():
 
 
 def _cloud_comando(comando):
-    """Envia comando via cloud usando door_control_1. Lanca excecao em falha."""
-    valor = 'open' if comando == 'abrir' else 'close'
-    r = get_cloud().sendcommand(COB_ID, [{'code': 'door_control_1', 'value': valor}])
+    """Envia comando via cloud usando switch_1 (DPS 1, booleano absoluto).
+    Lanca excecao em falha."""
+    valor = True if comando == 'abrir' else False
+    r = get_cloud().sendcommand(COB_ID, [{'code': 'switch_1', 'value': valor}])
     if not r.get('success'):
         raise RuntimeError(f'cloud sem sucesso: {r}')
     return True
