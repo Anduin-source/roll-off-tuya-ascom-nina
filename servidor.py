@@ -4,11 +4,19 @@ from flask import Flask, jsonify, render_template_string
 import tinytuya
 import json
 import os
+import sys
 
 app = Flask(__name__)
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DEVICES_FILE = os.path.join(BASE_DIR, 'devices.json')
+# Quando compilado pelo PyInstaller (sys.frozen=True), os arquivos de dados
+# (devices.json) ficam ao lado do .exe (sys.executable).
+# Em modo Python puro, ficam ao lado do .py (__file__).
+if getattr(sys, 'frozen', False):
+    _BASE_DIR = os.path.dirname(sys.executable)
+else:
+    _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+DEVICES_FILE = os.path.join(_BASE_DIR, 'devices.json')
 VERSION_PADRAO = 3.4
 MAX_WORKERS = 8
 
