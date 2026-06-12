@@ -1,0 +1,18 @@
+[
+  {
+    "name": "Pier 01 - Nome Cobertura",
+    "id": "DEVICE_ID_DA_COBERTURA",
+    "ip": "192.168.1.101",
+    "key": "LOCAL_KEY_DA_COBERTURA",
+    "category": "ckmkzq",
+    "version": 3.4
+  },
+  {
+    "name": "Pier 02 - Nome Cobertura",
+    "id": "DEVICE_ID_DA_COBERTURA",
+    "ip": "192.168.1.102",
+    "key": "LOCAL_KEY_DA_COBERTURA",
+    "category": "ckmkzq",
+    "version": 3.4
+  }
+]

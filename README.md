@@ -195,6 +195,23 @@ http://<IP-do-computador>:5000
 
 O servidor escuta em `0.0.0.0`, então outros computadores da mesma rede podem acessar pelo IP do computador que está rodando o painel.
 
+### Cadastro manual de piers
+
+O painel local lê as coberturas do arquivo `devices.json`. Para adicionar um novo pier sem rodar o wizard do tinytuya, copie `devices_exemplo.json` para `devices.json` e preencha um item por cobertura:
+
+```json
+{
+  "name": "Pier 01 - Nome Cobertura",
+  "id": "DEVICE_ID_DA_COBERTURA",
+  "ip": "192.168.1.101",
+  "key": "LOCAL_KEY_DA_COBERTURA",
+  "category": "ckmkzq",
+  "version": 3.4
+}
+```
+
+O painel mostra apenas dispositivos com `category` igual a `ckmkzq`, que é a categoria Tuya observada para coberturas/garagens. Isso evita que réguas e tomadas apareçam por engano no painel.
+
 ---
 
 ## Pré-requisitos de desenvolvimento

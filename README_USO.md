@@ -46,6 +46,8 @@ http://<IP-do-computador>:5000
 
 O painel usa `devices.json` e comunica com as coberturas pela rede local do observatorio, sem Tuya Cloud.
 
+Para adicionar um novo pier manualmente, edite `devices.json` e inclua um item com `name`, `id`, `ip`, `key`, `category: "ckmkzq"` e `version: 3.4`. Use `devices_exemplo.json` como modelo.
+
 ## Arquivos locais
 
 O arquivo `config.json` deve existir na raiz do projeto, mas nao deve ser enviado ao GitHub.
