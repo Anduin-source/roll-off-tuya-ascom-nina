@@ -1,4 +1,5 @@
 import ipv4_first  # IPv4 preferencial - ver ipv4_first.py
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Flask, jsonify, render_template_string
 import tinytuya
 import json
@@ -6,70 +7,119 @@ import os
 
 app = Flask(__name__)
 
-CONFIG_FILE = os.path.join(os.path.dirname(__file__), 'config.json')
-DEVICES_FILE = os.path.join(os.path.dirname(__file__), 'devices.json')
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DEVICES_FILE = os.path.join(BASE_DIR, 'devices.json')
+VERSION_PADRAO = 3.4
+MAX_WORKERS = 8
 
 # ---------------------------------------------------------------------------
-# Carregamento de configuracao e dispositivos
+# Dispositivos
 # ---------------------------------------------------------------------------
 
-def carregar_config():
-    with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-        return json.load(f)
+def carregar_devices_json():
+    if not os.path.exists(DEVICES_FILE):
+        raise FileNotFoundError('devices.json nao encontrado na pasta do projeto')
+    with open(DEVICES_FILE, 'r', encoding='utf-8') as f:
+        dados = json.load(f)
+    if isinstance(dados, dict):
+        return dados.get('devices', [])
+    return dados
+
+
+def normalizar_device(d):
+    return {
+        'id': d.get('id') or d.get('dev_id'),
+        'name': d.get('name') or d.get('nome') or d.get('id') or 'sem nome',
+        'ip': d.get('ip') or d.get('address'),
+        'key': d.get('key') or d.get('local_key'),
+        'version': float(d.get('version') or VERSION_PADRAO),
+        'category': d.get('category') or d.get('product_category') or '',
+    }
 
 
 def carregar_coberturas():
-    """Retorna apenas dispositivos da categoria ckmkzq (coberturas/garagens)."""
-    with open(DEVICES_FILE, 'r', encoding='utf-8') as f:
-        devices = json.load(f)
-    return [d for d in devices if d.get('category') == 'ckmkzq']
+    """Retorna coberturas/garagens do devices.json do tinytuya."""
+    devices = [normalizar_device(d) for d in carregar_devices_json()]
+    coberturas = []
+    for d in devices:
+        if d['category'] != 'ckmkzq':
+            continue
+        if not d['id']:
+            continue
+        coberturas.append(d)
+    return coberturas
 
 
-def get_cloud():
-    """Cria objeto Cloud a partir do config.json. Token gerenciado pelo tinytuya."""
-    cfg = carregar_config()
-    return tinytuya.Cloud(
-        apiRegion=cfg['tuya_cloud']['region'],
-        apiKey=cfg['tuya_cloud']['api_key'],
-        apiSecret=cfg['tuya_cloud']['api_secret']
+def procurar_cobertura(device_id):
+    return next((d for d in carregar_coberturas() if d['id'] == device_id), None)
+
+# ---------------------------------------------------------------------------
+# Tuya local
+# ---------------------------------------------------------------------------
+
+def abrir_device(device):
+    if not device.get('ip') or not device.get('key'):
+        raise RuntimeError('Dispositivo sem ip/local_key no devices.json')
+    d = tinytuya.Device(
+        dev_id=device['id'],
+        address=device['ip'],
+        local_key=device['key'],
+        version=device.get('version') or VERSION_PADRAO
     )
+    d.set_socketPersistent(False)
+    d.set_socketTimeout(3)
+    return d
 
-# ---------------------------------------------------------------------------
-# Status em lote — 1 chamada para todos os dispositivos (ate 20 por chamada)
-# Substitui o padrao antigo de N conexoes locais sequenciais.
-# Sem tinytuya.Device, sem socket local, sem risco de sessao fantasma.
-# ---------------------------------------------------------------------------
 
-def get_status_batch(device_ids):
-    """
-    Consulta o estado de todos os dispositivos em uma unica chamada cloud.
-    Retorna dict: {device_id: 'aberta' | 'fechada' | 'offline'}
+def fechar_device(d):
+    if d is not None:
+        try:
+            d.close()
+        except Exception:
+            pass
 
-    Usa doorcontact_state (DPS 3) — sensor fisico real, nao o ultimo comando.
-    False = fechada, True = aberta.
-    """
-    if not device_ids:
-        return {}
+
+def status_local(device):
+    d = abrir_device(device)
     try:
-        c = get_cloud()
-        ids_str = ','.join(device_ids)
-        result = c.cloudrequest(
-            f'/v1.0/iot-03/devices/status?device_ids={ids_str}'
-        )
-        status_map = {}
-        if result.get('success') and result.get('result'):
-            for item in result['result']:
-                dev_id = item.get('id')
-                if not dev_id:
-                    continue
-                dps = {s['code']: s['value'] for s in item.get('status', [])}
-                if 'doorcontact_state' in dps:
-                    status_map[dev_id] = 'aberta' if dps['doorcontact_state'] else 'fechada'
-                else:
-                    status_map[dev_id] = 'offline'
-        return status_map
-    except Exception:
-        return {}
+        resposta = d.status()
+        if not isinstance(resposta, dict) or 'dps' not in resposta:
+            raise RuntimeError(f'Resposta sem dps: {resposta}')
+        dps = resposta['dps']
+        if '3' not in dps:
+            raise RuntimeError('DPS 3/doorcontact_state ausente')
+        return 'aberta' if bool(dps.get('3')) else 'fechada'
+    finally:
+        fechar_device(d)
+
+
+def comando_local(device, comando):
+    if comando not in ('abrir', 'fechar'):
+        raise ValueError(f'Comando invalido: {comando!r}')
+    valor = True if comando == 'abrir' else False
+    d = abrir_device(device)
+    try:
+        resposta = d.set_value(1, valor)
+        if isinstance(resposta, dict) and 'Err' in resposta:
+            raise RuntimeError(f"Err {resposta['Err']}")
+        return resposta
+    finally:
+        fechar_device(d)
+
+
+def status_cobertura(device):
+    item = {
+        'id': device['id'],
+        'nome': device['name'],
+        'ip': device.get('ip') or '',
+        'status': 'offline',
+        'erro': '',
+    }
+    try:
+        item['status'] = status_local(device)
+    except Exception as e:
+        item['erro'] = str(e)[:160]
+    return item
 
 # ---------------------------------------------------------------------------
 # Endpoints da API
@@ -82,51 +132,41 @@ def index():
 
 @app.route('/api/dispositivos')
 def api_dispositivos():
-    """Retorna status de todas as coberturas em uma unica chamada cloud."""
-    coberturas = carregar_coberturas()
-    device_ids = [d['id'] for d in coberturas]
-    status_map = get_status_batch(device_ids)
+    """Retorna status das coberturas usando apenas a rede local."""
+    try:
+        coberturas = carregar_coberturas()
+    except Exception as e:
+        return jsonify({'erro': str(e), 'dispositivos': []}), 500
+
     resultado = []
-    for d in coberturas:
-        resultado.append({
-            'id': d['id'],
-            'nome': d['name'],
-            'status': status_map.get(d['id'], 'offline')
-        })
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        tarefas = {executor.submit(status_cobertura, d): d for d in coberturas}
+        for futuro in as_completed(tarefas):
+            resultado.append(futuro.result())
+    resultado.sort(key=lambda d: d['nome'].lower())
     return jsonify(resultado)
 
 
 @app.route('/api/acao/<device_id>/<comando>')
 def api_acao(device_id, comando):
     """
-    Envia comando via cloud usando switch_1 (DPS 1, booleano absoluto).
+    Envia comando local usando switch_1 (DPS 1, booleano absoluto).
     door_control_1 (DPS 6) e aceito mas ignorado pelo firmware MS-109.
     Fechar: direto. Abrir: confirmacao exigida no frontend.
-
-    Nao usa tinytuya.Device nem conexao local - invariante arquitetural:
-    somente dome_driver.py abre socket local com o MS-109.
     """
-    coberturas = carregar_coberturas()
-    device = next((d for d in coberturas if d['id'] == device_id), None)
+    device = procurar_cobertura(device_id)
     if not device:
         return jsonify({'erro': 'Dispositivo nao encontrado'}), 404
     if comando not in ('abrir', 'fechar'):
         return jsonify({'erro': 'Comando invalido'}), 400
     try:
-        c = get_cloud()
-        valor = True if comando == 'abrir' else False
-        result = c.sendcommand(
-            device_id,
-            [{'code': 'switch_1', 'value': valor}]
-        )
-        if result.get('success'):
-            return jsonify({
-                'ok': True,
-                'comando': comando,
-                'dispositivo': device['name']
-            })
-        else:
-            return jsonify({'erro': str(result)}), 500
+        resposta = comando_local(device, comando)
+        return jsonify({
+            'ok': True,
+            'comando': comando,
+            'dispositivo': device['name'],
+            'resposta': resposta,
+        })
     except Exception as e:
         return jsonify({'erro': str(e)}), 500
 
@@ -144,16 +184,19 @@ HTML = '''
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: Arial, sans-serif; background: #1a1a2e; color: #eee; padding: 20px; }
-        h1 { text-align: center; margin-bottom: 30px; color: #a0c4ff; font-size: 24px; }
+        h1 { text-align: center; margin-bottom: 8px; color: #a0c4ff; font-size: 24px; }
+        .sub { text-align: center; color: #8ea4c8; margin-bottom: 28px; font-size: 13px; }
         .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 20px; }
-        .card { background: #16213e; border-radius: 12px; padding: 20px; border: 1px solid #0f3460; }
-        .card h2 { font-size: 16px; margin-bottom: 12px; color: #a0c4ff; }
+        .card { background: #16213e; border-radius: 8px; padding: 20px; border: 1px solid #0f3460; }
+        .card h2 { font-size: 16px; margin-bottom: 6px; color: #a0c4ff; }
+        .ip { color: #7787a6; font-size: 12px; margin-bottom: 12px; }
         .status { font-size: 18px; font-weight: bold; margin-bottom: 16px; }
         .status.aberta  { color: #4ade80; }
         .status.fechada { color: #60a5fa; }
         .status.offline { color: #f87171; }
         .status.erro    { color: #fbbf24; }
         .status.aguarde { color: #888; }
+        .erro-msg { color: #fbbf24; min-height: 16px; font-size: 11px; margin: -8px 0 12px; }
         .botoes { display: flex; gap: 10px; }
         button {
             flex: 1; padding: 10px; border: none; border-radius: 8px;
@@ -165,69 +208,73 @@ HTML = '''
         .btn-fechar { background: #60a5fa; color: #000; }
         .btn-status { background: #374151; color: #eee; }
         .rodape {
-            text-align: center; color: #555; font-size: 12px;
+            text-align: center; color: #7b8499; font-size: 12px;
             margin-top: 24px;
         }
     </style>
 </head>
 <body>
     <h1>Observatorio Munhoz &mdash; Coberturas</h1>
+    <p class="sub">Painel local LAN &mdash; sem Tuya Cloud</p>
     <div class="grid" id="grid"></div>
     <p class="rodape" id="rodape">Carregando...</p>
 
     <script>
-        // Abrir exige confirmacao — abertura espontanea e pior modo de falha
         function confirmarAbrir(nome) {
             return confirm('Confirma ABRIR a cobertura "' + nome + '"?');
         }
 
-        function setStatus(id, texto, classe) {
+        function setStatus(id, texto, classe, erro) {
             const el = document.getElementById('status-' + id);
             if (el) { el.textContent = texto; el.className = 'status ' + classe; }
+            const err = document.getElementById('erro-' + id);
+            if (err) { err.textContent = erro || ''; }
         }
 
         function atualizar(id) {
-            setStatus(id, 'Verificando...', 'aguarde');
+            setStatus(id, 'Verificando...', 'aguarde', '');
             fetch('/api/dispositivos')
                 .then(r => r.json())
                 .then(dados => {
-                    const d = dados.find(x => x.id === id);
-                    if (d) setStatus(id, d.status.toUpperCase(), d.status);
+                    const lista = Array.isArray(dados) ? dados : (dados.dispositivos || []);
+                    const d = lista.find(x => x.id === id);
+                    if (d) setStatus(id, d.status.toUpperCase(), d.status, d.erro);
                 })
-                .catch(() => setStatus(id, 'ERRO', 'erro'));
+                .catch(() => setStatus(id, 'ERRO', 'erro', 'falha ao consultar servidor'));
         }
 
         function acao(id, nome, comando) {
             if (comando === 'abrir' && !confirmarAbrir(nome)) return;
-            setStatus(id, 'Aguarde...', 'aguarde');
+            setStatus(id, 'Aguarde...', 'aguarde', '');
             fetch('/api/acao/' + id + '/' + comando)
                 .then(r => r.json())
                 .then(res => {
                     if (res.erro) {
-                        setStatus(id, 'ERRO', 'erro');
+                        setStatus(id, 'ERRO', 'erro', res.erro);
                         alert('Erro: ' + res.erro);
                     } else {
-                        // Aguarda o tempo de curso do MS-109 (door_time_1 = 10s)
-                        // antes de reler o sensor fisico
                         setTimeout(() => atualizar(id), 12000);
                     }
                 })
-                .catch(() => setStatus(id, 'ERRO', 'erro'));
+                .catch(() => setStatus(id, 'ERRO', 'erro', 'falha ao enviar comando'));
         }
 
         function renderizar(dados) {
             const grid = document.getElementById('grid');
+            const lista = Array.isArray(dados) ? dados : (dados.dispositivos || []);
 
-            dados.forEach(d => {
+            if (!Array.isArray(dados) && dados.erro) {
+                document.getElementById('rodape').textContent = 'Erro: ' + dados.erro;
+                return;
+            }
+
+            lista.forEach(d => {
                 const existente = document.getElementById('card-' + d.id);
                 if (existente) {
-                    // Card ja existe — so atualiza o status
-                    setStatus(d.id, d.status.toUpperCase(), d.status);
+                    setStatus(d.id, d.status.toUpperCase(), d.status, d.erro);
                     return;
                 }
 
-                // Card novo — construido via DOM, sem strings inline
-                // (evita problemas de escape e nomes com caracteres especiais)
                 const card = document.createElement('div');
                 card.className = 'card';
                 card.id = 'card-' + d.id;
@@ -235,10 +282,19 @@ HTML = '''
                 const titulo = document.createElement('h2');
                 titulo.textContent = d.nome;
 
+                const ip = document.createElement('div');
+                ip.className = 'ip';
+                ip.textContent = d.ip || 'sem IP local';
+
                 const status = document.createElement('div');
                 status.className = 'status ' + d.status;
                 status.id = 'status-' + d.id;
                 status.textContent = d.status.toUpperCase();
+
+                const erro = document.createElement('div');
+                erro.className = 'erro-msg';
+                erro.id = 'erro-' + d.id;
+                erro.textContent = d.erro || '';
 
                 const botoes = document.createElement('div');
                 botoes.className = 'botoes';
@@ -259,13 +315,13 @@ HTML = '''
                 btnFechar.addEventListener('click', () => acao(d.id, d.nome, 'fechar'));
 
                 botoes.append(btnStatus, btnAbrir, btnFechar);
-                card.append(titulo, status, botoes);
+                card.append(titulo, ip, status, erro, botoes);
                 grid.appendChild(card);
             });
 
             document.getElementById('rodape').textContent =
                 'Ultima atualizacao: ' + new Date().toLocaleTimeString('pt-BR') +
-                ' (auto-refresh 60s) — apenas cloud, sem conexao local';
+                ' (auto-refresh 60s) - rede local';
         }
 
         function carregarTodos() {
@@ -273,12 +329,12 @@ HTML = '''
                 .then(r => r.json())
                 .then(renderizar)
                 .catch(() => {
-                    document.getElementById('rodape').textContent = 'Erro ao carregar — tentando novamente...';
+                    document.getElementById('rodape').textContent = 'Erro ao carregar - tentando novamente...';
                 });
         }
 
         carregarTodos();
-        setInterval(carregarTodos, 60000); // 60s — batch cloud, 1 chamada por ciclo
+        setInterval(carregarTodos, 60000);
     </script>
 </body>
 </html>

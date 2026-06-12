@@ -69,9 +69,9 @@ Painel web administrativo.
 
 Responsabilidades:
 
-- consultar coberturas via Tuya Cloud;
-- enviar comandos via Tuya Cloud;
-- evitar conexao local direta com a cobertura;
+- consultar coberturas diretamente pela rede local usando `devices.json`;
+- enviar comandos locais via `switch_1` / DPS 1;
+- evitar dependencia da Tuya Cloud para o painel administrativo;
 - fornecer painel para uso administrativo.
 
 ### tuya_cloud.py

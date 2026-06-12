@@ -179,7 +179,7 @@ Ela continua sendo controlada diretamente pela GUI via tinytuya local, com fallb
 
 O painel `servidor.py` é independente da GUI e do driver.
 
-Ele usa apenas a Tuya Cloud para consultar e comandar coberturas, sem abrir conexão local com os dispositivos.
+Ele foi pensado para uso dentro da rede local do observatório. O painel lê as coberturas do `devices.json` gerado pelo tinytuya e consulta/comanda cada dispositivo diretamente pela LAN, sem depender da Tuya Cloud.
 
 Para iniciar:
 
@@ -193,7 +193,7 @@ Depois acesse:
 http://<IP-do-computador>:5000
 ```
 
-O painel usa consulta cloud em lote para reduzir chamadas repetidas à API.
+O servidor escuta em `0.0.0.0`, então outros computadores da mesma rede podem acessar pelo IP do computador que está rodando o painel.
 
 ---
 

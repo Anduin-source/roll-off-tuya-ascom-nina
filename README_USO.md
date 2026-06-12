@@ -44,6 +44,8 @@ Depois acesse:
 http://<IP-do-computador>:5000
 ```
 
+O painel usa `devices.json` e comunica com as coberturas pela rede local do observatorio, sem Tuya Cloud.
+
 ## Arquivos locais
 
 O arquivo `config.json` deve existir na raiz do projeto, mas nao deve ser enviado ao GitHub.
