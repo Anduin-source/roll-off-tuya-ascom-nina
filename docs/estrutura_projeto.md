@@ -12,9 +12,15 @@ Arquivos principais:
 
 - telhado_gui.py
 - dome_driver.py
-- servidor.py
 - tuya_cloud.py
 - ipv4_first.py
+- servidor.py (atalho legado para o painel local)
+
+Painel local:
+
+- painel_local/servidor.py
+- painel_local/devices_exemplo.json
+- painel_local/README_PAINEL.md
 
 Configuracao:
 
@@ -34,6 +40,7 @@ Scripts:
 - scripts/run_gui.bat
 - scripts/run_driver.bat
 - scripts/run_web_panel.bat
+- scripts/build_web_panel.bat
 
 ## Papel dos arquivos principais
 
@@ -63,7 +70,7 @@ Responsabilidades:
 - executar comandos de abertura e fechamento;
 - fornecer endpoint de encerramento controlado via /shutdown.
 
-### servidor.py
+### painel_local/servidor.py
 
 Painel web administrativo.
 
@@ -73,6 +80,10 @@ Responsabilidades:
 - enviar comandos locais via `switch_1` / DPS 1;
 - evitar dependencia da Tuya Cloud para o painel administrativo;
 - fornecer painel para uso administrativo.
+
+### servidor.py
+
+Atalho legado que importa `painel_local.servidor` e inicia o mesmo painel. Mantido para nao quebrar comandos antigos como `python servidor.py`.
 
 ### tuya_cloud.py
 
@@ -98,7 +109,7 @@ requirements.txt
 
 ## Organizacao futura sugerida
 
-Uma reorganizacao futura pode mover os arquivos Python para uma estrutura mais padronizada:
+Uma reorganizacao futura pode mover a GUI e o driver para uma estrutura mais padronizada:
 
 src/rolloff_tuya_control/
 
@@ -121,7 +132,7 @@ A ordem recomendada e:
 2. documentar a arquitetura;
 3. revisar .gitignore e configuracoes;
 4. preparar scripts de execucao;
-5. somente depois renomear arquivos ou reorganizar pastas;
-6. por ultimo preparar empacotamento em executavel Windows.
+5. somente depois renomear arquivos ou reorganizar pastas da GUI/driver;
+6. por ultimo finalizar empacotamento em executavel Windows.
 
 Nao misturar renomeacao de arquivos, reorganizacao de imports e empacotamento em uma unica etapa.

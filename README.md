@@ -46,7 +46,8 @@ GUI encerra o driver que iniciou
 | --------------------------- | ------------------------------------------------------------------------- |
 | `telhado_gui.py`            | Interface gráfica Tkinter para controle da cobertura e régua              |
 | `dome_driver.py`            | Driver ASCOM Alpaca para integração com NINA                              |
-| `servidor.py`               | Painel web Flask para visualização/controle administrativo das coberturas |
+| `painel_local\servidor.py`  | Painel web Flask local para visualização/controle administrativo das coberturas |
+| `servidor.py`               | Atalho legado para iniciar o painel local                                 |
 | `tuya_cloud.py`             | Funções auxiliares para API Tuya Cloud                                    |
 | `ipv4_first.py`             | Preferência IPv4 para evitar atrasos em redes com IPv6 problemático       |
 | `config_exemplo.json`       | Modelo de configuração local                                              |
@@ -54,6 +55,7 @@ GUI encerra o driver que iniciou
 | `scripts\run_gui.bat`       | Inicia a interface gráfica usando o ambiente virtual                      |
 | `scripts\run_driver.bat`    | Inicia manualmente o driver Alpaca                                        |
 | `scripts\run_web_panel.bat` | Inicia o painel web administrativo                                        |
+| `scripts\build_web_panel.bat` | Gera executável Windows do painel local com PyInstaller                  |
 
 ---
 
@@ -177,7 +179,7 @@ Ela continua sendo controlada diretamente pela GUI via tinytuya local, com fallb
 
 ## Painel web administrativo
 
-O painel `servidor.py` é independente da GUI e do driver.
+O painel `painel_local\servidor.py` é independente da GUI e do driver.
 
 Ele foi pensado para uso dentro da rede local do observatório. O painel lê as coberturas do `devices.json` gerado pelo tinytuya e consulta/comanda cada dispositivo diretamente pela LAN, sem depender da Tuya Cloud.
 
@@ -197,7 +199,7 @@ O servidor escuta em `0.0.0.0`, então outros computadores da mesma rede podem a
 
 ### Cadastro manual de piers
 
-O painel local lê as coberturas do arquivo `devices.json`. Para adicionar um novo pier sem rodar o wizard do tinytuya, copie `devices_exemplo.json` para `devices.json` e preencha um item por cobertura:
+O painel local lê as coberturas do arquivo `devices.json`. Para adicionar um novo pier sem rodar o wizard do tinytuya, copie `painel_local\devices_exemplo.json` para `devices.json` e preencha um item por cobertura:
 
 ```json
 {
@@ -352,6 +354,12 @@ scripts\run_driver.bat
 
 ```bat
 scripts\run_web_panel.bat
+```
+
+Para preparar um executável Windows do painel local no futuro:
+
+```bat
+scripts\build_web_panel.bat
 ```
 
 ---
