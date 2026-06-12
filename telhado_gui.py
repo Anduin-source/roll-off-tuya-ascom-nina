@@ -38,7 +38,12 @@ DRIVER_TIMEOUT = 0.5   # conexao recusada e instantanea; 0.5s cobre driver lento
 # Configuracao - lida de config.json (nao versionado)
 # ---------------------------------------------------------------------------
 
-CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
+if getattr(sys, 'frozen', False):
+    BASE_DIR = os.path.dirname(sys.executable)
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+CONFIG_FILE = os.path.join(BASE_DIR, 'config.json')
 
 
 def carregar_config():
@@ -176,17 +181,20 @@ def _iniciar_driver_se_preciso():
         _driver_era_nosso = False
         return 'driver ja estava rodando'
 
-    # Sobe o driver. pythonw = sem console. cwd na pasta do projeto para
-    # ele achar config.json e devices.json.
+    # Sobe o driver. Em pacote Windows, prefere dome_driver.exe ao lado da GUI.
+    # Em desenvolvimento, usa dome_driver.py com pythonw quando disponivel.
     try:
-        base = os.path.dirname(os.path.abspath(__file__))
-        driver_path = os.path.join(base, 'dome_driver.py')
-        # pythonw.exe roda sem janela de console
-        pyw = os.path.join(os.path.dirname(sys.executable), 'pythonw.exe')
-        executavel = pyw if os.path.exists(pyw) else sys.executable
+        driver_exe = os.path.join(BASE_DIR, 'dome_driver.exe')
+        driver_py = os.path.join(BASE_DIR, 'dome_driver.py')
+        if os.path.exists(driver_exe):
+            cmd = [driver_exe]
+        else:
+            pyw = os.path.join(os.path.dirname(sys.executable), 'pythonw.exe')
+            executavel = pyw if os.path.exists(pyw) else sys.executable
+            cmd = [executavel, driver_py]
         _driver_proc = subprocess.Popen(
-            [executavel, driver_path],
-            cwd=base
+            cmd,
+            cwd=BASE_DIR
         )
         _driver_era_nosso = True
         # Espera o driver subir (ate ~8s - inclui a 1a leitura do dispositivo)

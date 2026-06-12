@@ -32,7 +32,10 @@ VERSAO_DRIVER = '2.1-ms109'  # ms109: pos-validacao DPS1 absoluto, abre-fecha
 # Configuracao - lida de config.json (nao versionado)
 # ---------------------------------------------------------------------------
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+if getattr(sys, 'frozen', False):
+    BASE_DIR = os.path.dirname(sys.executable)
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(BASE_DIR, 'config.json')
 
 

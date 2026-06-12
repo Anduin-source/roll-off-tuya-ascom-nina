@@ -56,6 +56,7 @@ GUI encerra o driver que iniciou
 | `scripts\run_driver.bat`    | Inicia manualmente o driver Alpaca                                        |
 | `scripts\run_web_panel.bat` | Inicia o painel web administrativo                                        |
 | `scripts\build_web_panel.bat` | Gera executável Windows do painel local com PyInstaller                  |
+| `scripts\build_telhado_gui_driver.bat` | Gera executáveis Windows da GUI e do driver Alpaca            |
 
 ---
 
@@ -431,18 +432,29 @@ pip freeze > requirements.txt
 
 ## Futuro empacotamento Windows
 
-O projeto poderá ser distribuído como executáveis Windows usando PyInstaller.
+O projeto pode ser distribuído como executáveis Windows usando PyInstaller.
 
-Estratégia recomendada:
+Para gerar o pacote da GUI + driver:
 
-```text
-telhado_gui.exe
-dome_driver.exe
-config_exemplo.json
-README_USO.md
+```bat
+scripts\build_telhado_gui_driver.bat
 ```
 
-A GUI deverá procurar primeiro por `dome_driver.exe`; se não encontrar, usará `dome_driver.py` no modo desenvolvimento.
+O pacote gerado fica em:
+
+```text
+dist\TelhadoControleEntrega
+```
+
+Conteúdo esperado:
+
+```text
+TelhadoGUI.exe
+dome_driver.exe
+iniciar_telhado_gui.bat
+config_exemplo.json
+README_TELHADO_GUI.txt
+```
 
 O `config.json` deve continuar externo ao executável.
 
