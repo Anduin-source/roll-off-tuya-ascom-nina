@@ -40,6 +40,13 @@ O pacote para o Cadu deve conter:
 
 ```text
 PainelCoberturas.exe
+iniciar_painel.bat
 devices.json
-README_PAINEL.md
+README_CADU.txt
+```
+
+O script `scripts\build_web_panel.bat` monta automaticamente a pasta:
+
+```text
+dist\PainelCoberturasEntrega
 ```
