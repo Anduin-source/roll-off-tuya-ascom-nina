@@ -11,7 +11,7 @@ import urllib.request
 import subprocess
 
 # ===========================================================================
-# Pier 1 - Interface de controle (GUI)
+# Interface de controle (GUI)
 #
 # Cobertura: cascata de conexao em 3 niveis (Etapa 4 da arquitetura)
 #   1. DRIVER  - se dome_driver.py estiver rodando (HTTP localhost:11111)
@@ -129,18 +129,22 @@ def _driver_vivo():
 
 
 def _driver_status():
-    """Le o status pelo driver. Retorna (aberta_bool_or_None, 'driver')."""
+    """Le o status pelo driver. Retorna (aberta_bool_or_None, modo_driver)."""
+    global _ultimo_modo_driver
     try:
         req = urllib.request.urlopen(DRIVER_URL + '/status', timeout=2)
         data = json.loads(req.read().decode())
         estado = data.get('estado')
+        sub = data.get('modo', 'local')
+        modo = 'driver_local' if sub == 'local' else 'driver_cloud'
+        _ultimo_modo_driver = modo
         if estado == 'aberta':
-            return True, 'driver'
+            return True, modo
         if estado == 'fechada':
-            return False, 'driver'
-        return None, 'driver'
+            return False, modo
+        return None, modo
     except Exception:
-        return None, 'driver'
+        return None, _ultimo_modo_driver
 
 
 def _driver_comando(comando):
@@ -168,6 +172,7 @@ def _driver_comando(comando):
 
 _driver_proc = None          # subprocesso do driver, se a GUI o subiu
 _driver_era_nosso = False    # True se a GUI iniciou o driver
+_ultimo_modo_driver = 'driver_local'  # atualizado por _driver_status()
 
 
 def _iniciar_driver_se_preciso():
@@ -328,7 +333,7 @@ def status_cobertura():
 def comando_cobertura(comando):
     """Envia abrir/fechar pela cascata. Retorna (ok, modo)."""
     if _driver_vivo():
-        return _driver_comando(comando), 'driver'
+        return _driver_comando(comando), _ultimo_modo_driver
     try:
         _local_comando(comando)
         return True, 'local'
@@ -345,6 +350,10 @@ def comando_cobertura(comando):
 # ---------------------------------------------------------------------------
 
 def _sufixo_modo(modo):
+    if modo == 'driver_local':
+        return ' [driver] [rede local]'
+    if modo == 'driver_cloud':
+        return ' [driver] [cloud]'
     if modo == 'driver':
         return ' [driver]'
     if modo == 'local':
@@ -483,7 +492,7 @@ def acao_regua(switch_num, comando):
         modo = None
         try:
             dispositivo, modo, dps = conectar_regua()
-            sufixo = ' [cloud]' if modo == 'cloud' else ''
+            sufixo = ' [cloud]' if modo == 'cloud' else ' [local]'
             code   = SWITCH_CODES[switch_num]
 
             if comando == 'status':
@@ -529,7 +538,7 @@ def status_todos_regua():
         modo = None
         try:
             dispositivo, modo, dps = conectar_regua()
-            sufixo = ' [cloud]' if modo == 'cloud' else ''
+            sufixo = ' [cloud]' if modo == 'cloud' else ' [local]'
             for sw in SWITCHES:
                 code = SWITCH_CODES[sw]
                 ligado = dps.get(str(sw), False) if modo == 'local' else dps.get(code, False)
@@ -615,11 +624,22 @@ def loop_schedule():
         time.sleep(10)
 
 
-def _loop_checar_driver():
-    """A cada 60s, verifica se o driver ainda esta vivo e atualiza label_modo.
-    Detecta queda silenciosa entre interacoes do usuario."""
+def _loop_status_regua():
+    """A cada 30s, atualiza status de todas as tomadas. Detecta mudanca de modo
+    (local<->cloud) sem necessidade de interacao do usuario."""
     while True:
-        time.sleep(60)
+        time.sleep(30)
+        try:
+            status_todos_regua()
+        except Exception:
+            pass
+
+
+def _loop_checar_driver():
+    """A cada 15s, verifica se o driver ainda esta vivo e atualiza label_modo.
+    Detecta queda silenciosa e mudanca de modo (local<->cloud) entre interacoes."""
+    while True:
+        time.sleep(15)
         try:
             texto = label_cob.cget('text')
             if texto not in ('buscando...', 'abrindo...', 'fechando...', 'encerrando...', '---'):
@@ -758,15 +778,13 @@ class HorarioEditavel:
 # ---------------------------------------------------------------------------
 
 janela = tk.Tk()
-janela.title("Pier 1 - Controle")
+janela.title("Controle")
 janela.configure(bg=BG)
 janela.geometry("420x700")
 janela.resizable(False, False)
 
-tk.Label(janela, text="\U0001F52D Pier 1", font=('Segoe UI', 15, 'bold'),
-         bg=BG, fg=TEXTO).pack(pady=(14, 2))
-tk.Label(janela, text="Observatorio Munhoz", font=('Segoe UI', 10),
-         bg=BG, fg=TEXTO_MUT).pack(pady=(0, 12))
+tk.Label(janela, text="\U0001F52D Controle", font=('Segoe UI', 15, 'bold'),
+         bg=BG, fg=TEXTO).pack(pady=(14, 14))
 
 # Card cobertura
 card_cob = tk.Frame(janela, bg=BG_CARD, bd=0,
@@ -875,6 +893,7 @@ iniciar_agendamento_salvo()
 atualizar_status_agendamento()
 threading.Thread(target=loop_schedule, daemon=True).start()
 threading.Thread(target=_loop_checar_driver, daemon=True).start()
+threading.Thread(target=_loop_status_regua, daemon=True).start()
 
 
 def _ao_fechar():
