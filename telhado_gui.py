@@ -422,8 +422,7 @@ def abrir_agendado():
         if not aberta:
             ok, modo = comando_cobertura('abrir')
             if ok:
-                janela.after(0, lambda: label_cob.config(
-                    text='ABERTA' + _sufixo_modo(modo), fg=VERDE))
+                janela.after(0, lambda m=modo: atualizar_label_cobertura(True, m))
     except Exception:
         pass
 
@@ -434,8 +433,7 @@ def fechar_agendado():
         if aberta:
             ok, modo = comando_cobertura('fechar')
             if ok:
-                janela.after(0, lambda: label_cob.config(
-                    text='FECHADA' + _sufixo_modo(modo), fg=AZUL))
+                janela.after(0, lambda m=modo: atualizar_label_cobertura(False, m))
     except Exception:
         pass
 
@@ -482,6 +480,7 @@ def acao_regua(switch_num, comando):
 
     def executar():
         dispositivo = None
+        modo = None
         try:
             dispositivo, modo, dps = conectar_regua()
             sufixo = ' [cloud]' if modo == 'cloud' else ''
@@ -510,8 +509,7 @@ def acao_regua(switch_num, comando):
         except Exception:
             labels_regua[switch_num].config(text='ERRO', fg=VERMELHO)
         finally:
-            # fecha conexao local da regua se foi local
-            if dispositivo is not None and hasattr(dispositivo, 'close'):
+            if modo == 'local' and dispositivo is not None:
                 try:
                     dispositivo.close()
                 except Exception:
@@ -528,6 +526,7 @@ def status_todos_regua():
     # Tenta uma leitura unica primeiro (1 conexao para os 4 switches)
     def executar():
         dispositivo = None
+        modo = None
         try:
             dispositivo, modo, dps = conectar_regua()
             sufixo = ' [cloud]' if modo == 'cloud' else ''
@@ -541,7 +540,7 @@ def status_todos_regua():
             for sw in SWITCHES:
                 labels_regua[sw].config(text='ERRO', fg=VERMELHO)
         finally:
-            if dispositivo is not None and hasattr(dispositivo, 'close'):
+            if modo == 'local' and dispositivo is not None:
                 try:
                     dispositivo.close()
                 except Exception:
@@ -616,6 +615,20 @@ def loop_schedule():
         time.sleep(10)
 
 
+def _loop_checar_driver():
+    """A cada 60s, verifica se o driver ainda esta vivo e atualiza label_modo.
+    Detecta queda silenciosa entre interacoes do usuario."""
+    while True:
+        time.sleep(60)
+        try:
+            texto = label_cob.cget('text')
+            if texto not in ('buscando...', 'abrindo...', 'fechando...', 'encerrando...', '---'):
+                aberta, modo = status_cobertura()
+                janela.after(0, lambda a=aberta, m=modo: atualizar_label_cobertura(a, m))
+        except Exception:
+            pass
+
+
 def formatar_hora(entry, label_feedback, config_key):
     val = entry.get().replace(':', '').strip()
 
@@ -647,9 +660,16 @@ def formatar_hora(entry, label_feedback, config_key):
 
     def criar_na_nuvem():
         try:
-            from tuya_cloud import criar_timer
+            from tuya_cloud import criar_timer, deletar_todos_timers
+            # Limpa tudo antes de recriar — evita acumulo de timers fantasmas
+            deletar_todos_timers()
             acao = 'abrir' if config_key == 'abrir' else 'fechar'
             r = criar_timer(hora, acao)
+            # Recria o outro horario configurado (deletar_todos apaga ambos)
+            outra_chave = 'fechar' if config_key == 'abrir' else 'abrir'
+            outra_hora = config.get('agendamento', {}).get(outra_chave, '')
+            if outra_hora:
+                criar_timer(outra_hora, outra_chave)
             if isinstance(r, dict) and r.get('success'):
                 feedback_agendamento(label_feedback, "salvo na nuvem", VERDE)
             else:
@@ -854,6 +874,7 @@ threading.Thread(target=get_cloud, daemon=True).start()
 iniciar_agendamento_salvo()
 atualizar_status_agendamento()
 threading.Thread(target=loop_schedule, daemon=True).start()
+threading.Thread(target=_loop_checar_driver, daemon=True).start()
 
 
 def _ao_fechar():

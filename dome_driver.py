@@ -402,9 +402,7 @@ def _tempo_curso():
         return max(_door_time, 20) + 3
 
 
-def _agendar_refresh(segundos):
-    """Compat: dispara o polling de confirmacao (ignora 'segundos', que era
-    a leitura unica antiga)."""
+def _agendar_refresh():
     _confirmar_transicao()
 
 
@@ -568,7 +566,7 @@ def abrir_simples():
             with _state_lock:
                 global _shutter
                 _shutter = 'Opening'
-            _agendar_refresh(_tempo_curso())
+            _agendar_refresh()
         return jsonify({'ok': True, 'via': via})
     return jsonify({'ok': False, 'erro': via}), 500
 
@@ -582,7 +580,7 @@ def fechar_simples():
             with _state_lock:
                 global _shutter
                 _shutter = 'Closing'
-            _agendar_refresh(_tempo_curso())
+            _agendar_refresh()
         return jsonify({'ok': True, 'via': via})
     return jsonify({'ok': False, 'erro': via}), 500
 
@@ -692,7 +690,7 @@ def open_shutter():
             with _state_lock:
                 global _shutter
                 _shutter = 'Opening'
-            _agendar_refresh(_tempo_curso())
+            _agendar_refresh()
         return jsonify({'ErrorNumber': 0, 'ErrorMessage': ''})
     return jsonify({'ErrorNumber': 1, 'ErrorMessage': via})
 
@@ -705,7 +703,7 @@ def close_shutter():
             with _state_lock:
                 global _shutter
                 _shutter = 'Closing'
-            _agendar_refresh(_tempo_curso())
+            _agendar_refresh()
         return jsonify({'ErrorNumber': 0, 'ErrorMessage': ''})
     return jsonify({'ErrorNumber': 1, 'ErrorMessage': via})
 

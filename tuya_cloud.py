@@ -7,7 +7,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 
 # ---------------------------------------------------------------------------
-# ConfiguraÃ§Ã£o â€” lida de config.json (nÃ£o versionado)
+# Configuração — lida de config.json (não versionado)
 # ---------------------------------------------------------------------------
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -40,7 +40,7 @@ TIMEZONE   = cfg['tuya_cloud'].get('timezone', 'America/Sao_Paulo')
 TIMER_CATEGORY = cfg['tuya_cloud'].get('timer_category', 'schedule')
 
 # ---------------------------------------------------------------------------
-# FunÃ§Ãµes
+# Funções
 # ---------------------------------------------------------------------------
 
 def conectar_cloud():
@@ -93,7 +93,7 @@ def criar_timer(hora_str, acao):
         raise
 
 # ---------------------------------------------------------------------------
-# Teste rÃ¡pido
+# Teste rápido
 # ---------------------------------------------------------------------------
 
 if __name__ == '__main__':

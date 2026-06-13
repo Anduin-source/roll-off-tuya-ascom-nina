@@ -169,7 +169,7 @@ def api_dispositivos():
     return jsonify(resultado)
 
 
-@app.route('/api/acao/<device_id>/<comando>')
+@app.route('/api/acao/<device_id>/<comando>', methods=['POST'])
 def api_acao(device_id, comando):
     """
     Envia comando local usando switch_1 (DPS 1, booleano absoluto).
@@ -268,7 +268,7 @@ HTML = '''
         function acao(id, nome, comando) {
             if (comando === 'abrir' && !confirmarAbrir(nome)) return;
             setStatus(id, 'Aguarde...', 'aguarde', '');
-            fetch('/api/acao/' + id + '/' + comando)
+            fetch('/api/acao/' + id + '/' + comando, {method: 'POST'})
                 .then(r => r.json())
                 .then(res => {
                     if (res.erro) {
