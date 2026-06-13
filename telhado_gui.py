@@ -852,7 +852,7 @@ for sw, nome in SWITCHES.items():
              bg=BG_CARD, fg=TEXTO, width=10, anchor='w').pack(side='left')
 
     lbl = tk.Label(row, text="---", font=('Segoe UI', 10, 'bold'),
-                   bg=BG_CARD, fg=CINZA, width=5)
+                   bg=BG_CARD, fg=CINZA, anchor='w')
     lbl.pack(side='left', padx=8)
     labels_regua[sw] = lbl
 
