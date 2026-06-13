@@ -181,12 +181,13 @@ def _iniciar_driver_se_preciso():
         _driver_era_nosso = False
         return 'driver ja estava rodando'
 
-    # Sobe o driver. Em pacote Windows, prefere dome_driver.exe ao lado da GUI.
-    # Em desenvolvimento, usa dome_driver.py com pythonw quando disponivel.
+    # Sobe o driver. Em pacote Windows, usa dome_driver.exe ao lado da GUI.
+    # Em desenvolvimento, usa sempre dome_driver.py para evitar pegar um exe
+    # antigo que tenha ficado na pasta durante testes de build.
     try:
         driver_exe = os.path.join(BASE_DIR, 'dome_driver.exe')
         driver_py = os.path.join(BASE_DIR, 'dome_driver.py')
-        if os.path.exists(driver_exe):
+        if getattr(sys, 'frozen', False) and os.path.exists(driver_exe):
             cmd = [driver_exe]
         else:
             pyw = os.path.join(os.path.dirname(sys.executable), 'pythonw.exe')
