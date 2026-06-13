@@ -16,7 +16,8 @@ devices.json
 *.local.json
 
 # Contexto local do Claude Code (nao versionar - contem dados da instalacao)
-CLAUDE.local.m
+CLAUDE.local.md
+claude_local.md
 
 # Logs
 logs/
@@ -60,5 +61,3 @@ servidor_backup_*.py
 *.lnk
 desktop.ini
 
-# Local file for Claude handoff (contains secrets) - DO NOT VERSION
-claude_local.md
