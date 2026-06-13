@@ -15,6 +15,9 @@ config.json
 devices.json
 *.local.json
 
+# Contexto local do Claude Code (nao versionar - contem dados da instalacao)
+CLAUDE.local.m
+
 # Logs
 logs/
 *.log
