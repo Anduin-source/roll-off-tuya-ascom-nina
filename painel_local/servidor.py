@@ -41,7 +41,7 @@ MAX_WORKERS = 8
 def carregar_devices_json():
     if not os.path.exists(DEVICES_FILE):
         raise FileNotFoundError('devices.json nao encontrado na pasta do projeto')
-    with open(DEVICES_FILE, 'r', encoding='utf-8') as f:
+    with open(DEVICES_FILE, 'r', encoding='utf-8-sig') as f:
         dados = json.load(f)
     if isinstance(dados, dict):
         return dados.get('devices', [])

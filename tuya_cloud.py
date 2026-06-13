@@ -27,7 +27,7 @@ def carregar_config():
         print("ERRO: config.json nÃ£o encontrado.")
         print("Copie config_exemplo.json para config.json e preencha suas credenciais.")
         sys.exit(1)
-    with open(CONFIG_FILE, 'r') as f:
+    with open(CONFIG_FILE, 'r', encoding='utf-8-sig') as f:
         return json.load(f)
 
 cfg = carregar_config()

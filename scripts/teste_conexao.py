@@ -42,7 +42,7 @@ import ipv4_first  # IPv4 preferencial
 import tinytuya
 
 BASE_DIR = PROJECT_DIR
-cfg = json.load(open(os.path.join(BASE_DIR, 'config.json'), encoding='utf-8'))
+cfg = json.load(open(os.path.join(BASE_DIR, 'config.json'), encoding='utf-8-sig'))
 
 COB_ID  = cfg['cobertura']['id']
 COB_IP  = cfg['cobertura']['ip']
