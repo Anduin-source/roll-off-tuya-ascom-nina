@@ -59,3 +59,6 @@ servidor_backup_*.py
 # Atalhos locais do Windows
 *.lnk
 desktop.ini
+
+# Local file for Claude handoff (contains secrets) - DO NOT VERSION
+claude_local.md
