@@ -1,4 +1,3 @@
 @echo off
 cd /d "%~dp0\.."
-call .venv\Scripts\activate.bat
-python telhado_gui.py
+start "" ".venv\Scripts\pythonw.exe" telhado_gui.py
