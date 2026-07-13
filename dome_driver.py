@@ -53,7 +53,7 @@ cfg = carregar_config()
 COB_ID     = cfg['cobertura']['id']
 COB_IP     = cfg['cobertura']['ip']
 COB_KEY    = cfg['cobertura']['key']
-VERSION    = 3.4
+VERSION    = cfg['cobertura'].get('version', 3.4)  # por device; default 3.4 preserva instalacoes existentes
 
 API_REGION = cfg['tuya_cloud']['region']
 API_KEY    = cfg['tuya_cloud']['api_key']
