@@ -11,7 +11,7 @@ from flask import Flask, jsonify
 import tinytuya
 
 # ===========================================================================
-# Pier 1 Tuya Dome Driver - Alpaca v2.0
+# Tuya Dome Driver - Alpaca v2.0
 #
 # Arquitetura: este driver e o DONO UNICO da conexao TCP local com a
 # cobertura (Novadigital MS-109). Nenhum outro processo deve abrir
@@ -54,6 +54,17 @@ COB_ID     = cfg['cobertura']['id']
 COB_IP     = cfg['cobertura']['ip']
 COB_KEY    = cfg['cobertura']['key']
 VERSION    = cfg['cobertura'].get('version', 3.4)  # por device; default 3.4 preserva instalacoes existentes
+
+# ---------------------------------------------------------------------------
+# Identidade Alpaca do device (fonte unica de verdade)
+# DEVICE_NAME: nome generico fixo, igual em todas as instalacoes. A
+#   diferenciacao entre piers se da pelo IP na descoberta do NINA, nao pelo nome.
+# UNIQUE_ID: derivado do id Tuya da cobertura (COB_ID). O id Tuya e globalmente
+#   unico por rele, estavel (independe de IP) e amarrado ao telhado fisico, entao
+#   cada instalacao nasce com identidade unica automaticamente, sem passo manual.
+# ---------------------------------------------------------------------------
+DEVICE_NAME = 'Tuya Dome'
+UNIQUE_ID   = f'tuya-dome-{COB_ID}'
 
 API_REGION = cfg['tuya_cloud']['region']
 API_KEY    = cfg['tuya_cloud']['api_key']
@@ -632,7 +643,7 @@ def api_versions():
 def management_description():
     return jsonify({
         'Value': {
-            'ServerName': 'Pier 1 Tuya Dome',
+            'ServerName': DEVICE_NAME,
             'Manufacturer': 'Observatorio Munhoz',
             'ManufacturerVersion': VERSAO_DRIVER,
             'Location': 'Munhoz MG'
@@ -645,10 +656,10 @@ def management_description():
 @app.route('/management/v1/configureddevices', methods=['GET'])
 def configured_devices():
     return jsonify({'Value': [{
-        'DeviceName': 'Pier 1 Tuya Dome',
+        'DeviceName': DEVICE_NAME,
         'DeviceType': 'Dome',
         'DeviceNumber': 0,
-        'UniqueID': 'pier1-tuya-dome-001'
+        'UniqueID': UNIQUE_ID
     }]})
 
 # ---------------------------------------------------------------------------
@@ -850,7 +861,7 @@ def at_home():
 
 @app.route('/api/v1/dome/0/name', methods=['GET'])
 def get_name():
-    return jsonify({'Value': 'Pier 1 Tuya Dome',
+    return jsonify({'Value': DEVICE_NAME,
                     'ErrorNumber': 0, 'ErrorMessage': ''})
 
 
@@ -863,7 +874,7 @@ def get_description():
 
 @app.route('/api/v1/dome/0/driverinfo', methods=['GET'])
 def get_driver_info():
-    return jsonify({'Value': f'Pier 1 Tuya Dome Driver v{VERSAO_DRIVER}',
+    return jsonify({'Value': f'{DEVICE_NAME} Driver v{VERSAO_DRIVER}',
                     'ErrorNumber': 0, 'ErrorMessage': ''})
 
 
@@ -887,7 +898,7 @@ def supported_actions():
 # ---------------------------------------------------------------------------
 
 if __name__ == '__main__':
-    log.info(f'Pier 1 Tuya Dome Driver - Alpaca v{VERSAO_DRIVER}')
+    log.info(f'{DEVICE_NAME} Driver - Alpaca v{VERSAO_DRIVER}')
     log.info('Rodando em http://localhost:11111')
     log.info('Conectando ao dispositivo...')
     ler_status()
