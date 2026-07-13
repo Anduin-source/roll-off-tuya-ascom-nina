@@ -85,6 +85,26 @@ anunciado mas quebrado (ex: Starlink), cada tentativa IPv6 custa ~21s de timeout
 Com 3 registros AAAA e 2 requisições HTTPS por chamada Tuya: ~128s por operação.
 Solução: `import ipv4_first` no topo de todo módulo que faz chamadas de rede.
 
+### 2.6 — Identidade Alpaca única por instalação, derivada do config
+
+O `dome_driver.py` anuncia ao NINA um `DeviceName`, um `ServerName` e um
+`UniqueID`. Regra:
+
+- **`DEVICE_NAME`** é genérico e fixo (`'Tuya Dome'`), igual em todas as
+  instalações. A diferenciação entre piers se dá **pelo IP** na descoberta do
+  NINA, nunca pelo nome.
+- **`UNIQUE_ID`** é **derivado do `id` Tuya da cobertura**
+  (`f'tuya-dome-{COB_ID}'`), definido logo após o carregamento do `config.json`.
+  **Nunca hardcoded.**
+
+**Por quê:** o `UniqueID` é a impressão digital que o ASCOM/NINA usa para lembrar
+o device entre reconexões (perfis, configurações). O `id` Tuya é globalmente
+único por relé, estável (independe de IP) e amarrado ao telhado físico, então
+cada instalação nasce única automaticamente. Valor hardcoded é herdado ao clonar
+a config de um pier para outro — foi a causa do incidente da seção 7 (o NINA
+controlando o telhado do pier errado). **IP nunca serve como identidade: ele
+muda** (ex.: IP ZeroTier de miniPC temporário).
+
 ---
 
 ## 3. Arquitetura
@@ -129,6 +149,8 @@ Dono único da conexão local quando ativo. Roda como processo independente
 - Transição Opening/Closing confirmada por sensor físico (DPS 3), não por timer
 - Poll de status a cada 30s em thread daemon
 - Logging rotativo (`dome_driver.log`, 1MB × 3 backups)
+- Identidade Alpaca (`DEVICE_NAME` genérico + `UNIQUE_ID` derivado do `id` Tuya)
+  definida logo após o carregamento do config — ver invariante 2.6
 
 Endpoints próprios:
 - `GET /health` — estado completo com contadores e modo atual
@@ -270,6 +292,28 @@ Usar sempre:
 
 DPS 6 é aceito pela API mas ignorado fisicamente pelo firmware do MS-109.
 Sempre usar DPS 1 / `switch_1` para comandos neste hardware.
+
+### NINA controla o telhado do pier errado
+
+Sintoma: comando pelo NINA aciona a cobertura de **outro** pier. O Alpaca é só
+HTTP para um IP e não tem noção de "dono" nem autenticação — obedece a qualquer
+endpoint conectado. Causas, em ordem:
+
+1. **Driver do pier alvo desligado** → a descoberta do NINA (broadcast UDP porta
+   32227) só acha servidores Alpaca vivos. Se o do pier certo está fora do ar, o
+   NINA conecta no único disponível (outro pier). Subir o driver do pier alvo
+   resolve.
+2. **`UniqueID` idêntico entre piers** (config clonada com identidade hardcoded)
+   → a descoberta pode deduplicar e os perfis se misturam. Corrigir com o
+   `UNIQUE_ID` derivado do `id` Tuya (invariante 2.6).
+3. **Servidor amarrado a todas as interfaces** → o mesmo driver aparece várias
+   vezes na descoberta (loopback, LAN local, ZeroTier), com nomes iguais. Sempre
+   identifique pelo **IP ZeroTier**; opcionalmente restrinja a interface de escuta.
+
+Diagnóstico: `http://<ip>:11111/management/v1/configureddevices` mostra a
+identidade real (nome + `UniqueID`) de cada endpoint. Isolamento real entre
+usuários/piers é responsabilidade da **rede** (redes ZeroTier separadas ou flow
+rules), não do driver.
 
 ---
 
