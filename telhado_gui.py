@@ -65,10 +65,12 @@ config = carregar_config()
 COB_ID  = config['cobertura']['id']
 COB_IP  = config['cobertura']['ip']
 COB_KEY = config['cobertura']['key']
+COB_VERSION = config['cobertura'].get('version', 3.4)
 
 REG_ID  = config['regua']['id']
 REG_IP  = config['regua']['ip']
 REG_KEY = config['regua']['key']
+REG_VERSION = config['regua'].get('version', 3.4)
 
 API_REGION = config['tuya_cloud']['region']
 API_KEY    = config['tuya_cloud']['api_key']
@@ -250,7 +252,7 @@ def _encerrar_driver():
 def _local_status():
     """Le status via conexao local direta. Abre e FECHA explicitamente.
     Retorna (aberta_bool_or_None). Lanca excecao em falha de conexao."""
-    d = tinytuya.Device(dev_id=COB_ID, address=COB_IP, local_key=COB_KEY, version=3.4)
+    d = tinytuya.Device(dev_id=COB_ID, address=COB_IP, local_key=COB_KEY, version=COB_VERSION)
     d.set_socketPersistent(False)
     d.set_socketTimeout(1.5)
     try:
@@ -281,7 +283,7 @@ def _local_comando(comando):
     True=abrir, False=fechar. Abre e FECHA explicitamente. Lanca excecao em falha.
     Nota: door_control_1 (DPS 6) e ignorado por este firmware (MS-109)."""
     valor = _comando_para_dps1(comando)
-    d = tinytuya.Device(dev_id=COB_ID, address=COB_IP, local_key=COB_KEY, version=3.4)
+    d = tinytuya.Device(dev_id=COB_ID, address=COB_IP, local_key=COB_KEY, version=COB_VERSION)
     d.set_socketPersistent(False)
     d.set_socketTimeout(1.5)
     try:
@@ -454,7 +456,7 @@ def conectar_regua():
     """Local primeiro (abre/fecha explicito), cloud como fallback.
     Retorna (dispositivo, modo, dps). Em modo local, o CHAMADOR e
     responsavel por fechar o dispositivo apos o uso."""
-    d = tinytuya.Device(dev_id=REG_ID, address=REG_IP, local_key=REG_KEY, version=3.4)
+    d = tinytuya.Device(dev_id=REG_ID, address=REG_IP, local_key=REG_KEY, version=REG_VERSION)
     d.set_socketPersistent(False)
     d.set_socketTimeout(1.5)
     try:

@@ -16,7 +16,7 @@ Ao fechar a GUI, ela encerra somente o driver que ela propria iniciou.
 1. Abra `scripts\run_gui.bat`.
 2. Aguarde o status da cobertura aparecer na GUI.
 3. Abra o NINA.
-4. Conecte o Dome ao driver `Pier 1 Tuya Dome`.
+4. Conecte o Dome ao driver `Tuya Dome`.
 5. Ao terminar a sessao, feche o NINA.
 6. Feche a GUI.
 
@@ -46,7 +46,7 @@ http://<IP-do-computador>:5000
 
 O painel usa `devices.json` e comunica com as coberturas pela rede local do observatorio, sem Tuya Cloud.
 
-Para adicionar um novo pier manualmente, edite `devices.json` e inclua um item com `name`, `id`, `ip`, `key`, `category: "ckmkzq"` e `version: 3.4`. Use `painel_local\devices_exemplo.json` como modelo.
+Para adicionar um novo pier manualmente, edite `devices.json` e inclua um item com `name`, `id`, `ip`, `key`, `category: "ckmkzq"` e `version`. Use `painel_local\devices_exemplo.json` como modelo. A versao Tuya deve ser conferida por dispositivo; use `3.4` para dispositivos que responderem em `3.4` e `3.5` para dispositivos que responderem em `3.5`.
 
 ## Arquivos locais
 

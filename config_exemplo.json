@@ -2,12 +2,14 @@
   "cobertura": {
     "id":  "SEU_DEVICE_ID_AQUI",
     "ip":  "192.168.x.x",
-    "key": "SUA_LOCAL_KEY_AQUI"
+    "key": "SUA_LOCAL_KEY_AQUI",
+    "version": 3.4
   },
   "regua": {
     "id":  "SEU_DEVICE_ID_AQUI",
     "ip":  "192.168.x.x",
     "key": "SUA_LOCAL_KEY_AQUI",
+    "version": 3.4,
     "switches": {
       "1": "Switch 1",
       "2": "PC",

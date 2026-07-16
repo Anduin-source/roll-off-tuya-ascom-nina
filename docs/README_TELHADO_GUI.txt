@@ -35,7 +35,7 @@ COMO USAR COM NINA
 2. Aguarde o status da cobertura.
 3. Abra o NINA.
 4. Conecte o Dome no driver Alpaca:
-   Pier 1 Tuya Dome @ 127.0.0.1
+   Tuya Dome @ 127.0.0.1
 5. Ao terminar, feche o NINA.
 6. Feche a GUI.
 

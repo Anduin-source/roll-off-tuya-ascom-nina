@@ -47,7 +47,7 @@ cfg = json.load(open(os.path.join(BASE_DIR, 'config.json'), encoding='utf-8-sig'
 COB_ID  = cfg['cobertura']['id']
 COB_IP  = cfg['cobertura']['ip']
 COB_KEY = cfg['cobertura']['key']
-VERSION = 3.4
+VERSION = cfg['cobertura'].get('version', 3.4)
 
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 20
 INTERVALO = 30  # segundos entre leituras — REPLICA o poll real do driver,
