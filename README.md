@@ -70,7 +70,9 @@ copy config_exemplo.json config.json
   "cobertura": {
     "id":  "ID_DO_DISPOSITIVO",
     "ip":  "IP_LOCAL_DO_DISPOSITIVO",
-    "key": "LOCAL_KEY_DO_DISPOSITIVO"
+    "key": "LOCAL_KEY_DO_DISPOSITIVO",
+    "version": 3.4,
+    "modo_conexao": "auto"
   },
   "regua": {
     "id":  "ID_DA_REGUA",
@@ -96,6 +98,10 @@ copy config_exemplo.json config.json
 Não sabe o `id`, `ip` ou `key` do seu dispositivo? Rode o assistente do [tinytuya](https://github.com/jasonacox/tinytuya) (`python -m tinytuya wizard`) — ele descobre esses dados a partir da sua conta Tuya Cloud.
 
 `config.json` contém credenciais e nunca deve ser enviado ao GitHub (já protegido pelo `.gitignore`).
+
+`modo_conexao` aceita `auto`, `local` ou `cloud`. Use `auto` no caso normal
+(rede local com fallback cloud). Em uma instalação acessível somente pela
+Tuya Cloud, use `cloud`; assim o driver não perde tempo tentando a LAN.
 
 ---
 

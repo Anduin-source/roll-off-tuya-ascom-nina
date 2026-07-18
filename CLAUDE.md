@@ -105,6 +105,20 @@ a config de um pier para outro — foi a causa do incidente da seção 7 (o NINA
 controlando o telhado do pier errado). **IP nunca serve como identidade: ele
 muda** (ex.: IP ZeroTier de miniPC temporário).
 
+### 2.7 — Cloud sempre com timeout, serialização e envelope
+
+TinyTuya 1.18.1 não define timeout nas chamadas `requests` e repassa o corpo de
+`sendcommand()` diretamente à API. Regras:
+
+- importar `requests_timeout` antes de criar `tinytuya.Cloud`;
+- executar somente uma operação cloud por vez em cada processo;
+- enviar comandos como `{"commands": [...]}`, nunca como lista isolada;
+- uma leitura cloud pode ser repetida uma vez; comandos não são repetidos
+  automaticamente porque um timeout não prova que a Tuya deixou de aceitá-los.
+
+Instalações sem acesso LAN devem usar `"modo_conexao": "cloud"` para não
+acumular tentativas locais e erro 905.
+
 ---
 
 ## 3. Arquitetura
