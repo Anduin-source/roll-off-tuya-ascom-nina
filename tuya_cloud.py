@@ -1,4 +1,5 @@
 import ipv4_first  # IPv4 preferencial — ver ipv4_first.py
+import requests_timeout  # timeout obrigatorio nas chamadas TinyTuya Cloud
 import tinytuya
 import json
 import os

@@ -1,4 +1,5 @@
 import ipv4_first  # IPv4 preferencial - ver ipv4_first.py
+import requests_timeout  # timeout obrigatorio nas chamadas TinyTuya Cloud
 import threading
 import time
 import socket
@@ -26,7 +27,7 @@ import tinytuya
 #   DPS 12 door_state_1      - alarme: 'none' = normal
 # ===========================================================================
 
-VERSAO_DRIVER = '2.1-ms109'  # ms109: pos-validacao DPS1 absoluto, abre-fecha
+VERSAO_DRIVER = '2.2-cloud-robusto'
 
 # ---------------------------------------------------------------------------
 # Configuracao - lida de config.json (nao versionado)
@@ -54,6 +55,11 @@ COB_ID     = cfg['cobertura']['id']
 COB_IP     = cfg['cobertura']['ip']
 COB_KEY    = cfg['cobertura']['key']
 VERSION    = cfg['cobertura'].get('version', 3.4)  # por device; default 3.4 preserva instalacoes existentes
+MODO_CONEXAO = str(cfg['cobertura'].get('modo_conexao', 'auto')).lower()
+if MODO_CONEXAO not in ('auto', 'local', 'cloud'):
+    raise ValueError('cobertura.modo_conexao deve ser auto, local ou cloud')
+LOCAL_HABILITADO = MODO_CONEXAO in ('auto', 'local')
+CLOUD_HABILITADA = MODO_CONEXAO in ('auto', 'cloud')
 
 # ---------------------------------------------------------------------------
 # Identidade Alpaca do device (fonte unica de verdade)
@@ -95,6 +101,11 @@ log.addHandler(_ch)
 _state_lock  = threading.Lock()    # protege o estado abaixo
 _device_lock = threading.RLock()   # serializa operacoes locais no MS-109
 _cloud_lock  = threading.Lock()    # protege criacao do objeto cloud
+_cloud_op_lock = threading.RLock() # uma unica chamada cloud por vez
+_status_refresh_lock = threading.Lock()
+_command_lock = threading.Lock()
+_transition_lock = threading.Lock()
+_backoff_lock = threading.Lock()
 
 _connected   = False
 _shutter     = 'Unknown'           # Open/Closed/Opening/Closing/Error/Unknown
@@ -110,6 +121,11 @@ _cloud_fallback_total = 0
 _comandos_total       = 0
 _ultimo_erro_local    = ''
 _ultimo_erro_cloud    = ''
+_falhas_status_consecutivas = 0
+_transicao_ativa = False
+_transicao_deadline = 0.0
+
+STATUS_OBSOLETO_S = 120
 
 app = Flask(__name__)
 
@@ -176,27 +192,34 @@ _proxima_tentativa_local = 0.0
 
 
 def _local_liberado():
-    return time.time() >= _proxima_tentativa_local
+    if not LOCAL_HABILITADO:
+        return False
+    with _backoff_lock:
+        return time.time() >= _proxima_tentativa_local
 
 
 def _registrar_falha_local(erro):
     global _falhas_consecutivas, _proxima_tentativa_local
     global _local_failures_total, _ultimo_erro_local
-    _falhas_consecutivas += 1
-    _local_failures_total += 1
-    _ultimo_erro_local = str(erro)[:200]
-    espera = min(30 * (2 ** min(_falhas_consecutivas - 1, 3)), 300)
-    _proxima_tentativa_local = time.time() + espera
-    log.warning(f'Falha local #{_falhas_consecutivas}: {erro} '
+    with _backoff_lock:
+        _falhas_consecutivas += 1
+        _local_failures_total += 1
+        _ultimo_erro_local = str(erro)[:200]
+        espera = min(30 * (2 ** min(_falhas_consecutivas - 1, 4)), 300)
+        _proxima_tentativa_local = time.time() + espera
+        numero = _falhas_consecutivas
+    log.warning(f'Falha local #{numero}: {erro} '
                 f'- backoff {espera}s antes da proxima tentativa local')
 
 
 def _registrar_sucesso_local():
     global _falhas_consecutivas, _proxima_tentativa_local
-    if _falhas_consecutivas > 0:
+    with _backoff_lock:
+        anteriores = _falhas_consecutivas
+        _falhas_consecutivas = 0
+        _proxima_tentativa_local = 0.0
+    if anteriores > 0:
         log.info('Caminho local recuperado - backoff zerado')
-    _falhas_consecutivas = 0
-    _proxima_tentativa_local = 0.0
 
 # ---------------------------------------------------------------------------
 # Cloud singleton
@@ -221,6 +244,7 @@ def get_cloud():
 def _aplicar_status(dps_aberta, door_time, alarm, via_cloud):
     """Atualiza o estado interno a partir de uma leitura bem-sucedida."""
     global _shutter, _connected, _modo_cloud, _door_time, _status_ts, _door_alarm
+    global _falhas_status_consecutivas
     with _state_lock:
         estado_fisico = 'Open' if dps_aberta else 'Closed'
         # Transicao: so confirma a saida de Opening/Closing quando o sensor
@@ -239,6 +263,7 @@ def _aplicar_status(dps_aberta, door_time, alarm, via_cloud):
         else:
             _shutter = estado_fisico     # estado estavel: segue o sensor
         _connected  = True
+        _falhas_status_consecutivas = 0
         _modo_cloud = via_cloud
         _status_ts  = time.time()
         if door_time:
@@ -264,49 +289,63 @@ def _status_local():
 
 
 def _status_cloud():
-    """Leitura via API cloud. Lanca excecao em falha."""
+    """Leitura cloud com uma repeticao para falhas HTTP transitorias."""
     global _ultimo_erro_cloud
-    try:
-        r = get_cloud().getstatus(COB_ID)
-        if not r.get('success'):
-            raise RuntimeError(f'Cloud sem sucesso: {r}')
-        dps = {item['code']: item['value'] for item in r.get('result', [])}
-        if 'doorcontact_state' not in dps:
-            raise RuntimeError('Cloud sem doorcontact_state')
-        return (bool(dps['doorcontact_state']),
-                int(dps.get('door_time_1', 0)) or None,
-                dps.get('door_state_1'))
-    except Exception as e:
-        _ultimo_erro_cloud = str(e)[:200]
-        raise
+    if not CLOUD_HABILITADA:
+        raise RuntimeError('Cloud desabilitada por configuracao')
+
+    ultimo_erro = None
+    for tentativa in (1, 2):
+        try:
+            with _cloud_op_lock:
+                r = get_cloud().getstatus(COB_ID)
+            if not isinstance(r, dict) or not r.get('success'):
+                raise RuntimeError(f'Cloud sem sucesso: {r}')
+            dps = {item['code']: item['value'] for item in r.get('result', [])}
+            if 'doorcontact_state' not in dps:
+                raise RuntimeError('Cloud sem doorcontact_state')
+            return (bool(dps['doorcontact_state']),
+                    int(dps.get('door_time_1', 0)) or None,
+                    dps.get('door_state_1'))
+        except Exception as e:
+            ultimo_erro = e
+            _ultimo_erro_cloud = str(e)[:200]
+            if tentativa == 1:
+                log.warning(f'Leitura cloud falhou; repetindo em 1s: {e}')
+                time.sleep(1)
+    raise ultimo_erro
 
 
 def ler_status():
     """Atualiza o cache de status. Local primeiro (se liberado pelo
-    backoff), cloud como fallback. Marca erro se ambos falharem."""
-    global _cloud_fallback_total
+    backoff), cloud como fallback. Preserva o ultimo estado em falhas
+    transitorias e retorna True somente quando houve leitura valida."""
+    global _cloud_fallback_total, _falhas_status_consecutivas
+    global _connected
 
-    if _local_liberado():
-        try:
-            aberta, dt, alarm = _status_local()
-            _registrar_sucesso_local()
-            _aplicar_status(aberta, dt, alarm, via_cloud=False)
-            return
-        except Exception as e:
-            _registrar_falha_local(e)
+    with _status_refresh_lock:
+        if _local_liberado():
+            try:
+                aberta, dt, alarm = _status_local()
+                _registrar_sucesso_local()
+                _aplicar_status(aberta, dt, alarm, via_cloud=False)
+                return True
+            except Exception as e:
+                _registrar_falha_local(e)
 
-    try:
-        aberta, dt, alarm = _status_cloud()
-        _cloud_fallback_total += 1
-        _aplicar_status(aberta, dt, alarm, via_cloud=True)
-        return
-    except Exception as e:
-        log.error(f'Status falhou em ambos os caminhos. Cloud: {e}')
+        if CLOUD_HABILITADA:
+            try:
+                aberta, dt, alarm = _status_cloud()
+                _cloud_fallback_total += 1
+                _aplicar_status(aberta, dt, alarm, via_cloud=True)
+                return True
+            except Exception as e:
+                log.error(f'Status falhou. Cloud: {e}')
 
-    with _state_lock:
-        global _shutter, _connected
-        _shutter   = 'Error'
-        _connected = False
+        with _state_lock:
+            _falhas_status_consecutivas += 1
+            _connected = False
+        return False
 
 # ---------------------------------------------------------------------------
 # Envio de comandos
@@ -350,8 +389,15 @@ def _comando_cloud(comando):
     global _ultimo_erro_cloud
     valor = _comando_para_dps1(comando)
     try:
-        r = get_cloud().sendcommand(
-            COB_ID, [{'code': 'switch_1', 'value': valor}])
+        if not CLOUD_HABILITADA:
+            raise RuntimeError('Cloud desabilitada por configuracao')
+        # TinyTuya repassa o corpo recebido diretamente para a API Tuya.
+        # A API exige o envelope {"commands": [...]}; uma lista isolada faz
+        # as leituras cloud funcionarem, mas o comando ser rejeitado.
+        with _cloud_op_lock:
+            r = get_cloud().sendcommand(COB_ID, {
+                'commands': [{'code': 'switch_1', 'value': valor}]
+            })
         if not r.get('success'):
             raise RuntimeError(f'Cloud sem sucesso: {r}')
         return True
@@ -366,42 +412,55 @@ def _comando_redundante(comando):
     operacional — principalmente para 'close' em automacoes de seguranca."""
     with _state_lock:
         return (
-            (comando == 'close' and _shutter == 'Closed') or
-            (comando == 'open'  and _shutter == 'Open')
+            (comando == 'close' and _shutter in ('Closed', 'Closing')) or
+            (comando == 'open'  and _shutter in ('Open', 'Opening'))
         )
 
 
 def enviar_comando(comando, origem='nina'):
     """Envia 'open' ou 'close'. Local (se liberado) -> cloud.
     Retorna (ok, via). Loga tudo."""
-    global _comandos_total, _cloud_fallback_total
-    _comandos_total += 1
-    t0 = time.time()
+    global _comandos_total, _cloud_fallback_total, _shutter
+    with _command_lock:
+        _comandos_total += 1
+        t0 = time.time()
 
-    if _comando_redundante(comando):
-        log.info(f'COMANDO {comando} origem={origem} ignorado: estado ja confirmado ({_shutter})')
-        return True, 'cache'
+        if _comando_redundante(comando):
+            with _state_lock:
+                atual = _shutter
+            log.info(f'COMANDO {comando} origem={origem} ignorado: '
+                     f'estado atual={atual}')
+            return True, 'cache'
 
-    if _local_liberado():
-        try:
-            _comando_local(comando)
-            _registrar_sucesso_local()
-            log.info(f'COMANDO {comando} origem={origem} via=local '
-                     f'latencia={time.time()-t0:.1f}s')
-            return True, 'local'
-        except Exception as e:
-            _registrar_falha_local(e)
+        via = None
+        erro_final = None
 
-    try:
-        _comando_cloud(comando)
-        _cloud_fallback_total += 1
-        log.info(f'COMANDO {comando} origem={origem} via=cloud '
+        if _local_liberado():
+            try:
+                _comando_local(comando)
+                _registrar_sucesso_local()
+                via = 'local'
+            except Exception as e:
+                erro_final = e
+                _registrar_falha_local(e)
+
+        if via is None and CLOUD_HABILITADA:
+            try:
+                _comando_cloud(comando)
+                _cloud_fallback_total += 1
+                via = 'cloud'
+            except Exception as e:
+                erro_final = e
+
+        if via is None:
+            log.error(f'COMANDO {comando} origem={origem} FALHOU: {erro_final}')
+            return False, str(erro_final)
+
+        with _state_lock:
+            _shutter = 'Opening' if comando == 'open' else 'Closing'
+        log.info(f'COMANDO {comando} origem={origem} via={via} '
                  f'latencia={time.time()-t0:.1f}s')
-        return True, 'cloud'
-    except Exception as e:
-        log.error(f'COMANDO {comando} origem={origem} FALHOU em ambos '
-                  f'os caminhos: {e}')
-        return False, str(e)
+        return True, via
 
 
 def _tempo_curso():
@@ -418,24 +477,41 @@ def _agendar_refresh():
 
 
 def _confirmar_transicao():
-    """Apos um comando, faz poll do sensor a cada 2s ate o estado transitorio
-    (Opening/Closing) ser confirmado pelo sensor fisico, ou ate o timeout.
-    Timeout generoso (curso real ~15s + margem). Substitui a leitura unica,
-    que perdia o momento quando o curso era maior que o estimado."""
+    """Mantem somente um monitor de movimento, com consultas cloud moderadas."""
+    global _transicao_ativa, _transicao_deadline
+    timeout_s = max(60, _tempo_curso() + 30)
+    with _transition_lock:
+        _transicao_deadline = time.time() + timeout_s
+        if _transicao_ativa:
+            return
+        _transicao_ativa = True
+
     def _job():
-        limite = time.time() + 30  # teto de 30s para confirmar
-        while time.time() < limite:
-            ler_status()
+        global _transicao_ativa, _shutter, _connected
+        try:
+            while True:
+                with _transition_lock:
+                    limite = _transicao_deadline
+                if time.time() >= limite:
+                    break
+                ler_status()
+                with _state_lock:
+                    transitorio = _shutter in ('Opening', 'Closing')
+                if not transitorio:
+                    return
+                time.sleep(5)
+
             with _state_lock:
-                transitorio = _shutter in ('Opening', 'Closing')
-            if not transitorio:
-                return  # sensor confirmou o estado final
-            time.sleep(2)
-        # Timeout: o sensor nunca confirmou. Loga para diagnostico.
-        with _state_lock:
-            s = _shutter
-        log.warning(f'Transicao nao confirmada em 30s (estado={s}). '
-                    f'Possivel obstrucao, falha mecanica ou curso muito longo.')
+                s = _shutter
+                if s in ('Opening', 'Closing'):
+                    _shutter = 'Error'
+                    _connected = False
+            log.warning(f'Transicao nao confirmada em {timeout_s}s '
+                        f'(estado={s}). Verificar status cloud e sensor.')
+        finally:
+            with _transition_lock:
+                _transicao_ativa = False
+
     threading.Thread(target=_job, daemon=True).start()
 
 # ---------------------------------------------------------------------------
@@ -450,17 +526,20 @@ def _confirmar_transicao():
 def _verificar_fechada():
     """Le o sensor fisico pelos dois caminhos. Retorna True se confirmada
     fechada, False se aberta, None se ilegivel."""
-    try:
-        aberta, _, _ = _status_local()
-        _registrar_sucesso_local()
-        return not aberta
-    except Exception:
-        pass
-    try:
-        aberta, _, _ = _status_cloud()
-        return not aberta
-    except Exception:
-        return None
+    if LOCAL_HABILITADO:
+        try:
+            aberta, _, _ = _status_local()
+            _registrar_sucesso_local()
+            return not aberta
+        except Exception:
+            pass
+    if CLOUD_HABILITADA:
+        try:
+            aberta, _, _ = _status_cloud()
+            return not aberta
+        except Exception:
+            pass
+    return None
 
 
 def executar_emergency_close():
@@ -471,7 +550,13 @@ def executar_emergency_close():
     tentativas = []
     curso = _tempo_curso()
 
-    for caminho, enviar in (('local', _comando_local), ('cloud', _comando_cloud)):
+    caminhos = []
+    if LOCAL_HABILITADO:
+        caminhos.append(('local', _comando_local))
+    if CLOUD_HABILITADA:
+        caminhos.append(('cloud', _comando_cloud))
+
+    for caminho, enviar in caminhos:
         try:
             enviar('close')
             log.info(f'emergency_close: comando enviado via {caminho}, '
@@ -501,11 +586,14 @@ def executar_emergency_close():
 
 def poll_status():
     while True:
-        ler_status()
-        with _state_lock:
-            modo = 'cloud' if _modo_cloud else 'local'
-            s = _shutter
-        log.info(f'[poll] status={s} modo={modo}')
+        try:
+            ok = ler_status()
+            with _state_lock:
+                modo = 'cloud' if _modo_cloud else 'local'
+                s = _shutter
+            log.info(f'[poll] status={s} modo={modo} leitura={"ok" if ok else "falhou"}')
+        except Exception:
+            log.exception('Erro inesperado no poll; a thread continuara ativa')
         time.sleep(30)
 
 # ---------------------------------------------------------------------------
@@ -530,19 +618,34 @@ def alpaca_discovery():
 # Endpoints novos (driver v2.0) - consumidos pela GUI e por scripts
 # ---------------------------------------------------------------------------
 
+def _estado_publico():
+    """Retorna estado confiavel; status antigo nunca e anunciado como atual."""
+    with _state_lock:
+        idade = time.time() - _status_ts if _status_ts else None
+        obsoleto = idade is None or idade > STATUS_OBSOLETO_S
+        shutter = 'Error' if obsoleto else _shutter
+        connected = bool(_connected and not obsoleto)
+        return shutter, connected, idade, obsoleto
+
+
 @app.route('/health', methods=['GET'])
 def health():
-    with _state_lock:
-        idade = round(time.time() - _status_ts, 1) if _status_ts else None
+    shutter_publico, connected_publico, idade_bruta, obsoleto = _estado_publico()
+    with _state_lock, _backoff_lock:
+        idade = round(idade_bruta, 1) if idade_bruta is not None else None
         return jsonify({
             'driver_version': VERSAO_DRIVER,
             'uptime_s': round(time.time() - _inicio_driver),
-            'connected': _connected,
-            'shutter': _shutter,
+            'connected': connected_publico,
+            'shutter': shutter_publico,
+            'shutter_interno': _shutter,
             'modo': 'cloud' if _modo_cloud else 'local',
+            'modo_conexao_configurado': MODO_CONEXAO,
             'door_time_s': _door_time,
             'door_alarm': _door_alarm,
             'status_idade_s': idade,
+            'status_obsoleto': obsoleto,
+            'falhas_status_consecutivas': _falhas_status_consecutivas,
             'local_failures_total': _local_failures_total,
             'cloud_fallbacks_total': _cloud_fallback_total,
             'comandos_total': _comandos_total,
@@ -557,14 +660,16 @@ def health():
 @app.route('/status', methods=['GET'])
 def status_simples():
     """Status simplificado para a GUI - sem interpretar codigos Alpaca."""
+    shutter_publico, _, idade_bruta, obsoleto = _estado_publico()
     with _state_lock:
         mapa = {'Open': 'aberta', 'Closed': 'fechada', 'Opening': 'abrindo',
                 'Closing': 'fechando', 'Error': 'erro', 'Unknown': 'desconhecido'}
-        idade = round(time.time() - _status_ts, 1) if _status_ts else None
+        idade = round(idade_bruta, 1) if idade_bruta is not None else None
         return jsonify({
-            'estado': mapa.get(_shutter, 'desconhecido'),
+            'estado': mapa.get(shutter_publico, 'desconhecido'),
             'modo': 'cloud' if _modo_cloud else 'local',
             'idade_s': idade,
+            'obsoleto': obsoleto,
         })
 
 
@@ -574,9 +679,6 @@ def abrir_simples():
     ok, via = enviar_comando('open', origem='gui')
     if ok:
         if via != 'cache':
-            with _state_lock:
-                global _shutter
-                _shutter = 'Opening'
             _agendar_refresh()
         return jsonify({'ok': True, 'via': via})
     return jsonify({'ok': False, 'erro': via}), 500
@@ -588,9 +690,6 @@ def fechar_simples():
     ok, via = enviar_comando('close', origem='gui')
     if ok:
         if via != 'cache':
-            with _state_lock:
-                global _shutter
-                _shutter = 'Closing'
             _agendar_refresh()
         return jsonify({'ok': True, 'via': via})
     return jsonify({'ok': False, 'erro': via}), 500
@@ -668,8 +767,7 @@ def configured_devices():
 
 @app.route('/api/v1/dome/0/connected', methods=['GET'])
 def get_connected():
-    with _state_lock:
-        val = _connected
+    _, val, _, _ = _estado_publico()
     return jsonify({'Value': val, 'ErrorNumber': 0, 'ErrorMessage': ''})
 
 
@@ -678,8 +776,7 @@ def put_connected():
     # Retorna estado em cache imediatamente - nao bloqueia o NINA.
     # Refresh disparado em background.
     threading.Thread(target=ler_status, daemon=True).start()
-    with _state_lock:
-        val = _connected
+    _, val, _, _ = _estado_publico()
     return jsonify({'Value': val, 'ErrorNumber': 0, 'ErrorMessage': ''})
 
 
@@ -687,8 +784,7 @@ def put_connected():
 def get_shutter_status():
     status_map = {'Open': 0, 'Closed': 1, 'Opening': 2, 'Closing': 3,
                   'Error': 4, 'Unknown': 4}
-    with _state_lock:
-        s = _shutter
+    s, _, _, _ = _estado_publico()
     return jsonify({'Value': status_map.get(s, 4),
                     'ErrorNumber': 0, 'ErrorMessage': ''})
 
@@ -698,9 +794,6 @@ def open_shutter():
     ok, via = enviar_comando('open', origem='nina')
     if ok:
         if via != 'cache':
-            with _state_lock:
-                global _shutter
-                _shutter = 'Opening'
             _agendar_refresh()
         return jsonify({'ErrorNumber': 0, 'ErrorMessage': ''})
     return jsonify({'ErrorNumber': 1, 'ErrorMessage': via})
@@ -711,9 +804,6 @@ def close_shutter():
     ok, via = enviar_comando('close', origem='nina')
     if ok:
         if via != 'cache':
-            with _state_lock:
-                global _shutter
-                _shutter = 'Closing'
             _agendar_refresh()
         return jsonify({'ErrorNumber': 0, 'ErrorMessage': ''})
     return jsonify({'ErrorNumber': 1, 'ErrorMessage': via})
@@ -900,12 +990,9 @@ def supported_actions():
 if __name__ == '__main__':
     log.info(f'{DEVICE_NAME} Driver - Alpaca v{VERSAO_DRIVER}')
     log.info('Rodando em http://localhost:11111')
-    log.info('Conectando ao dispositivo...')
-    ler_status()
-    with _state_lock:
-        modo = 'cloud' if _modo_cloud else 'local'
-        s = _shutter
-    log.info(f'Status inicial: {s} ({modo})')
+    log.info(f'Modo de conexao configurado: {MODO_CONEXAO}')
+    # O primeiro status roda em background para que /health fique disponivel
+    # imediatamente, mesmo se a cloud estiver lenta ou indisponivel.
     threading.Thread(target=poll_status, daemon=True).start()
     threading.Thread(target=alpaca_discovery, daemon=True).start()
     app.run(host='0.0.0.0', port=11111, debug=False, threaded=True)

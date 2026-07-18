@@ -52,3 +52,7 @@ Para adicionar um novo pier manualmente, edite `devices.json` e inclua um item c
 
 O arquivo `config.json` deve existir na raiz do projeto, mas nao deve ser enviado ao GitHub.
 Use `config_exemplo.json` como modelo.
+
+Em um pier que opere somente pela Tuya Cloud, configure
+`"modo_conexao": "cloud"` dentro de `cobertura`. O valor padrao `auto` tenta
+primeiro a rede local e usa a cloud como fallback.

@@ -1,4 +1,5 @@
 import ipv4_first  # IPv4 preferencial - ver ipv4_first.py
+import requests_timeout  # timeout obrigatorio nas chamadas TinyTuya Cloud
 import tkinter as tk
 import tinytuya
 import threading
@@ -66,6 +67,11 @@ COB_ID  = config['cobertura']['id']
 COB_IP  = config['cobertura']['ip']
 COB_KEY = config['cobertura']['key']
 COB_VERSION = config['cobertura'].get('version', 3.4)
+MODO_CONEXAO = str(config['cobertura'].get('modo_conexao', 'auto')).lower()
+if MODO_CONEXAO not in ('auto', 'local', 'cloud'):
+    raise ValueError('cobertura.modo_conexao deve ser auto, local ou cloud')
+LOCAL_HABILITADO = MODO_CONEXAO in ('auto', 'local')
+CLOUD_HABILITADA = MODO_CONEXAO in ('auto', 'cloud')
 
 REG_ID  = config['regua']['id']
 REG_IP  = config['regua']['ip']
@@ -103,6 +109,7 @@ SEPARADOR = '#1e3a5f'
 
 _cloud      = None
 _cloud_lock = threading.Lock()
+_cloud_op_lock = threading.RLock()
 
 
 def get_cloud():
@@ -115,6 +122,17 @@ def get_cloud():
                 apiSecret=API_SECRET
             )
     return _cloud
+
+
+def _enviar_comando_cloud(device_id, code, value):
+    """Envia um comando no formato exigido pela API Tuya Cloud."""
+    with _cloud_op_lock:
+        r = get_cloud().sendcommand(device_id, {
+            'commands': [{'code': code, 'value': value}]
+        })
+    if not isinstance(r, dict) or not r.get('success'):
+        raise RuntimeError(f'cloud sem sucesso: {r}')
+    return True
 
 # ---------------------------------------------------------------------------
 # Camada de comunicacao da COBERTURA - cascata driver -> local -> cloud
@@ -131,7 +149,7 @@ def _driver_vivo():
 
 
 def _driver_status():
-    """Le o status pelo driver. Retorna (aberta_bool_or_None, modo_driver)."""
+    """Le o estado textual do driver: aberta/fechada/abrindo/fechando/erro."""
     global _ultimo_modo_driver
     try:
         req = urllib.request.urlopen(DRIVER_URL + '/status', timeout=2)
@@ -140,13 +158,11 @@ def _driver_status():
         sub = data.get('modo', 'local')
         modo = 'driver_local' if sub == 'local' else 'driver_cloud'
         _ultimo_modo_driver = modo
-        if estado == 'aberta':
-            return True, modo
-        if estado == 'fechada':
-            return False, modo
-        return None, modo
+        if estado in ('aberta', 'fechada', 'abrindo', 'fechando', 'erro'):
+            return estado, modo
+        return 'desconhecido', modo
     except Exception:
-        return None, _ultimo_modo_driver
+        return 'erro', _ultimo_modo_driver
 
 
 def _driver_comando(comando):
@@ -155,7 +171,7 @@ def _driver_comando(comando):
     try:
         rota = '/abrir' if comando == 'abrir' else '/fechar'
         req = urllib.request.Request(DRIVER_URL + rota, method='POST')
-        resp = urllib.request.urlopen(req, timeout=10)
+        resp = urllib.request.urlopen(req, timeout=25)
         data = json.loads(resp.read().decode())
         return data.get('ok', False)
     except Exception:
@@ -300,7 +316,8 @@ def _local_comando(comando):
 
 def _cloud_status():
     """Le status via cloud. Retorna aberta_bool_or_None."""
-    s = get_cloud().getstatus(COB_ID)
+    with _cloud_op_lock:
+        s = get_cloud().getstatus(COB_ID)
     if s and 'result' in s:
         for item in s['result']:
             if item.get('code') == 'doorcontact_state':
@@ -312,40 +329,47 @@ def _cloud_comando(comando):
     """Envia comando via cloud usando switch_1 (DPS 1, booleano absoluto).
     Lanca excecao em falha."""
     valor = _comando_para_dps1(comando)
-    r = get_cloud().sendcommand(COB_ID, [{'code': 'switch_1', 'value': valor}])
-    if not r.get('success'):
-        raise RuntimeError(f'cloud sem sucesso: {r}')
-    return True
+    return _enviar_comando_cloud(COB_ID, 'switch_1', valor)
 
 
 def status_cobertura():
-    """Le o status da cobertura pela cascata. Retorna (aberta, modo)."""
+    """Le o status da cobertura. Retorna (estado_textual, modo)."""
     if _driver_vivo():
         return _driver_status()
-    try:
-        return _local_status(), 'local'
-    except Exception:
-        pass
-    try:
-        return _cloud_status(), 'cloud'
-    except Exception:
-        return None, 'cloud'
+    if LOCAL_HABILITADO:
+        try:
+            aberta = _local_status()
+            return ('aberta' if aberta else 'fechada'), 'local'
+        except Exception:
+            pass
+    if CLOUD_HABILITADA:
+        try:
+            aberta = _cloud_status()
+            if aberta is None:
+                return 'erro', 'cloud'
+            return ('aberta' if aberta else 'fechada'), 'cloud'
+        except Exception:
+            pass
+    return 'erro', 'cloud' if CLOUD_HABILITADA else 'local'
 
 
 def comando_cobertura(comando):
     """Envia abrir/fechar pela cascata. Retorna (ok, modo)."""
     if _driver_vivo():
         return _driver_comando(comando), _ultimo_modo_driver
-    try:
-        _local_comando(comando)
-        return True, 'local'
-    except Exception:
-        pass
-    try:
-        _cloud_comando(comando)
-        return True, 'cloud'
-    except Exception:
-        return False, 'cloud'
+    if LOCAL_HABILITADO:
+        try:
+            _local_comando(comando)
+            return True, 'local'
+        except Exception:
+            pass
+    if CLOUD_HABILITADA:
+        try:
+            _cloud_comando(comando)
+            return True, 'cloud'
+        except Exception:
+            pass
+    return False, 'cloud' if CLOUD_HABILITADA else 'local'
 
 # ---------------------------------------------------------------------------
 # Atualizacao do label da cobertura - fonte unica de verdade
@@ -365,16 +389,25 @@ def _sufixo_modo(modo):
     return ''
 
 
-def atualizar_label_cobertura(aberta, modo):
+def atualizar_label_cobertura(estado, modo):
     sufixo = _sufixo_modo(modo).strip()
-    if aberta is None:
-        label_cob.config(text='ERRO', fg=VERMELHO)
-        label_modo.config(text='')
-    else:
-        label_cob.config(
-            text='ABERTA' if aberta else 'FECHADA',
-            fg=VERDE if aberta else AZUL)
-        label_modo.config(text=sufixo)
+    estilos = {
+        'aberta': ('ABERTA', VERDE),
+        'fechada': ('FECHADA', AZUL),
+        'abrindo': ('ABRINDO...', AMARELO),
+        'fechando': ('FECHANDO...', AMARELO),
+        'erro': ('SEM STATUS', VERMELHO),
+        'desconhecido': ('SEM STATUS', VERMELHO),
+    }
+    texto, cor = estilos.get(estado, estilos['desconhecido'])
+    label_cob.config(text=texto, fg=cor)
+    label_modo.config(text=sufixo)
+
+    # Evita repetir o mesmo comando durante uma transicao. Fechar permanece
+    # disponivel durante abertura por ser a direcao prioritaria de seguranca.
+    btn_abrir.config(state='disabled' if estado in ('abrindo', 'fechando') else 'normal')
+    btn_fechar.config(state='disabled' if estado == 'fechando' else 'normal')
+    btn_atualizar.config(state='normal')
 
 # ---------------------------------------------------------------------------
 # Acoes da cobertura
@@ -389,62 +422,56 @@ def acao_cobertura(comando):
     def executar():
         try:
             if comando == 'status':
-                aberta, modo = status_cobertura()
-                janela.after(0, lambda: atualizar_label_cobertura(aberta, modo))
+                estado, modo = status_cobertura()
+                janela.after(0, lambda e=estado, m=modo: atualizar_label_cobertura(e, m))
 
             elif comando in ('abrir', 'fechar'):
-                aberta_atual, modo = status_cobertura()
-                alvo_aberta = (comando == 'abrir')
+                estado_atual, modo = status_cobertura()
+                estado_alvo = 'aberta' if comando == 'abrir' else 'fechada'
+                estado_transicao = 'abrindo' if comando == 'abrir' else 'fechando'
 
                 # Se ja esta no estado desejado, nao envia comando nem mostra
                 # transicao - apenas confirma o estado atual (espelha a
                 # supressao de comando redundante que o driver ja faz).
-                if aberta_atual is not None and aberta_atual == alvo_aberta:
-                    janela.after(0, lambda: atualizar_label_cobertura(aberta_atual, modo))
+                if estado_atual in (estado_alvo, estado_transicao):
+                    janela.after(
+                        0, lambda e=estado_atual, m=modo: atualizar_label_cobertura(e, m))
                 else:
                     ok, modo = comando_cobertura(comando)
-                    transicao = 'abrindo...' if comando == 'abrir' else 'fechando...'
-                    janela.after(0, lambda: label_cob.config(text=transicao, fg=AMARELO))
-
-                    def verificar():
-                        time.sleep(13)  # door_time_1 (10s) + margem
-                        aberta2, modo2 = status_cobertura()
-                        # No fechar, da uma segunda chance se ainda aberta
-                        if comando == 'fechar' and aberta2 is True:
-                            time.sleep(8)
-                            aberta2, modo2 = status_cobertura()
-                        janela.after(0, lambda: atualizar_label_cobertura(aberta2, modo2))
-
-                    threading.Thread(target=verificar, daemon=True).start()
+                    if not ok:
+                        janela.after(
+                            0, lambda m=modo: atualizar_label_cobertura('erro', m))
+                        janela.after(
+                            0, lambda: label_modo.config(text='comando nao enviado'))
+                    else:
+                        janela.after(
+                            0, lambda e=estado_transicao, m=modo:
+                            atualizar_label_cobertura(e, m))
 
         except Exception:
-            janela.after(0, lambda: label_cob.config(text='ERRO', fg=VERMELHO))
-
-        janela.after(0, lambda: btn_abrir.config(state='normal'))
-        janela.after(0, lambda: btn_fechar.config(state='normal'))
-        janela.after(0, lambda: btn_atualizar.config(state='normal'))
+            janela.after(0, lambda: atualizar_label_cobertura('erro', ''))
 
     threading.Thread(target=executar, daemon=True).start()
 
 
 def abrir_agendado():
     try:
-        aberta, _ = status_cobertura()
-        if not aberta:
+        estado, _ = status_cobertura()
+        if estado == 'fechada':
             ok, modo = comando_cobertura('abrir')
             if ok:
-                janela.after(0, lambda m=modo: atualizar_label_cobertura(True, m))
+                janela.after(0, lambda m=modo: atualizar_label_cobertura('abrindo', m))
     except Exception:
         pass
 
 
 def fechar_agendado():
     try:
-        aberta, _ = status_cobertura()
-        if aberta:
+        estado, _ = status_cobertura()
+        if estado != 'fechada' and estado != 'fechando':
             ok, modo = comando_cobertura('fechar')
             if ok:
-                janela.after(0, lambda m=modo: atualizar_label_cobertura(False, m))
+                janela.after(0, lambda m=modo: atualizar_label_cobertura('fechando', m))
     except Exception:
         pass
 
@@ -473,7 +500,8 @@ def conectar_regua():
         pass
 
     c = get_cloud()
-    s = c.getstatus(REG_ID)
+    with _cloud_op_lock:
+        s = c.getstatus(REG_ID)
     dps = {}
     if s and 'result' in s:
         for item in s['result']:
@@ -507,14 +535,14 @@ def acao_regua(switch_num, comando):
                 if modo == 'local':
                     dispositivo.set_value(switch_num, True)
                 else:
-                    dispositivo.sendcommand(REG_ID, [{'code': code, 'value': True}])
+                    _enviar_comando_cloud(REG_ID, code, True)
                 labels_regua[switch_num].config(text='ON' + sufixo, fg=VERDE)
 
             elif comando == 'desligar':
                 if modo == 'local':
                     dispositivo.set_value(switch_num, False)
                 else:
-                    dispositivo.sendcommand(REG_ID, [{'code': code, 'value': False}])
+                    _enviar_comando_cloud(REG_ID, code, False)
                 labels_regua[switch_num].config(text='OFF' + sufixo, fg=CINZA)
 
         except Exception:
@@ -638,15 +666,15 @@ def _loop_status_regua():
 
 
 def _loop_checar_driver():
-    """A cada 15s, verifica se o driver ainda esta vivo e atualiza label_modo.
-    Detecta queda silenciosa e mudanca de modo (local<->cloud) entre interacoes."""
+    """Acompanha transicoes a cada 5s e estados estaveis a cada 15s."""
     while True:
-        time.sleep(15)
+        texto = label_cob.cget('text')
+        time.sleep(5 if texto in ('ABRINDO...', 'FECHANDO...') else 15)
         try:
-            texto = label_cob.cget('text')
-            if texto not in ('buscando...', 'abrindo...', 'fechando...', 'encerrando...', '---'):
-                aberta, modo = status_cobertura()
-                janela.after(0, lambda a=aberta, m=modo: atualizar_label_cobertura(a, m))
+            if label_cob.cget('text') not in ('buscando...', 'encerrando...', '---'):
+                estado, modo = status_cobertura()
+                janela.after(
+                    0, lambda e=estado, m=modo: atualizar_label_cobertura(e, m))
         except Exception:
             pass
 
